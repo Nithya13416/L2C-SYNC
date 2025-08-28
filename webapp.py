@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 # --- Load secrets from .env ---
 load_dotenv()
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "").strip()
+print("SLACK_WEBHOOK_URL =", webhook_url)
 
 st.set_page_config(page_title="Teams-like Messaging App (Slack)", layout="wide")
 st.title("💬 Teams-like Messaging App → Slack (Webhook Only)")
