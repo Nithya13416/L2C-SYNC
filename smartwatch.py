@@ -11,7 +11,7 @@ st.set_page_config(page_title="⌚ Smartwatch Chat Monitor", layout="centered")
 st.title("⌚ Smartwatch Health Chat")
 
 # Load Slack webhook URL from Streamlit secrets
-SLACK_WEBHOOK_URL = st.secrets.get("SLACK_WEBHOOK_URL")
+SLACK_WEBHOOK_URL2 = os.getenv("SLACK_WEBHOOK_URL2", "").strip()
 
 # ------------------------
 # Simulate Smartwatch Reading
