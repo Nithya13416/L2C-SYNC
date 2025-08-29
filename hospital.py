@@ -213,3 +213,49 @@ def login_page():
             st.rerun()
         else:
             st.error("Invalid credentials")
+
+            # =======================================
+# Main App
+# =======================================
+def main():
+    if "page" not in st.session_state:
+        st.session_state.page = "login"
+    if "selected_patient" not in st.session_state:
+        st.session_state.selected_patient = None
+
+    if st.session_state.page == "login":
+        login_page()
+    elif st.session_state.page == "patients":
+        st.title("👨‍⚕️ Patients List")
+
+        conn = sqlite3.connect("patients.db")
+        try:
+            df = pd.read_sql("SELECT * FROM patients_data", conn)
+        except:
+            df = pd.DataFrame()
+        conn.close()
+
+        if df.empty:
+            st.warning("⚠️ No patient data found. Please upload.")
+            uploaded = st.file_uploader("Upload patient CSV", type=["csv"])
+            if uploaded:
+                df = pd.read_csv(uploaded)
+                save_uploaded_data(df)
+                st.success("✅ Data uploaded successfully!")
+                st.rerun()
+        else:
+            st.dataframe(df)
+
+            selected = st.selectbox("Select Patient", df["name"].tolist())
+            if st.button("Open Dashboard"):
+                st.session_state.selected_patient = df[df["name"] == selected].iloc[0].to_dict()
+                st.session_state.page = "dashboard"
+                st.rerun()
+
+    elif st.session_state.page == "dashboard":
+        dashboard_page()
+
+
+if __name__ == "__main__":
+    main()
+
