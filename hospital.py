@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime
 
 # ---------------------------
 # Dummy Users
@@ -58,8 +57,7 @@ def init_db():
             weight REAL, height REAL, email TEXT,
             heart_rate INTEGER, temperature REAL,
             oxygen INTEGER, systolic INTEGER,
-            diastolic INTEGER, bmi REAL,
-            uploaded_at TEXT
+            diastolic INTEGER, bmi REAL
         )
     """)
     conn.commit()
@@ -84,22 +82,13 @@ def save_uploaded_data(df):
         "Diastolic": "diastolic"
     })
 
-    # add uploaded_at timestamp
-    df["uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     conn = sqlite3.connect("patients.db")
-    df.to_sql("patients_data", conn, if_exists="append", index=False)
+    df.to_sql("patients_data", conn, if_exists="replace", index=False)
     conn.close()
 
 def get_patients():
     conn = sqlite3.connect("patients.db")
     df = pd.read_sql("SELECT * FROM patients_data", conn)
-    conn.close()
-    return df
-
-def get_patient_history(name):
-    conn = sqlite3.connect("patients.db")
-    df = pd.read_sql("SELECT * FROM patients_data WHERE name = ?", conn, params=(name,))
     conn.close()
     return df
 
@@ -171,71 +160,36 @@ def patients_page():
         st.info("ℹ️ No patient data found. Please upload an Excel file.")
 
 # ---------------------------
-# Vital Check Helper
-# ---------------------------
-def check_vitals(row):
-    issues = []
-
-    # Heart rate
-    if row["heart_rate"] < 60 or row["heart_rate"] > 100:
-        issues.append("Heart Rate")
-
-    # Temperature
-    if row["temperature"] < 36 or row["temperature"] > 37.5:
-        issues.append("Temperature")
-
-    # Oxygen
-    if row["oxygen"] < 95:
-        issues.append("Oxygen")
-
-    # Blood pressure
-    if row["systolic"] >= 140 or row["diastolic"] >= 90:
-        issues.append("Blood Pressure")
-
-    # BMI
-    if row["bmi"] < 18.5 or row["bmi"] > 24.9:
-        issues.append("BMI")
-
-    return issues
-
-# ---------------------------
 # Dashboard Page
 # ---------------------------
 def dashboard_page():
     load_css()
     patient = st.session_state.selected_patient
+
     st.title("📊 Smartwatch Health Dashboard")
 
-    if st.button("🔙 Return to Patients"):
-        st.session_state.page = "patients"
-        st.rerun()
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        if st.button("🔙 Return to Patients"):
+            st.session_state.page = "patients"
+            st.rerun()
+    with col2:
+        if st.button("🔑 Back to Login"):
+            st.session_state.page = "login"
+            st.rerun()
 
     st.subheader(f"Patient: {patient['name']}")
 
-    # Get patient history
-    df_hist = get_patient_history(patient['name'])
-
-    # ---- NEW ALERT LOGIC ----
-    issues = check_vitals(patient)
-    if len(issues) == 0:
-        st.success("✅ Status: Normal")
-    elif len(issues) == 1:
-        st.warning(f"⚠️ Status: Mild Alert ({issues[0]})")
-    else:
-        st.error(f"🚨 Status: Critical Alert (Problems with {', '.join(issues)})")
-
-    # Trends
-    if not df_hist.empty:
-        st.markdown("### 📈 Health Trends")
-        st.line_chart(df_hist.set_index("uploaded_at")[["heart_rate", "temperature", "oxygen"]])
-
-    # Show detailed metrics (cards)
+    # First row
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"""
             <div class="card">
                 <h4>❤️ Heart Rate</h4>
                 <div class="metric-value">{patient['heart_rate']} BPM</div>
+                <div class="status {'normal' if 60 <= patient['heart_rate'] <= 100 else 'low'}">
+                    {'Normal' if 60 <= patient['heart_rate'] <= 100 else 'Alert'}
+                </div>
             </div>
         """, unsafe_allow_html=True)
     with col2:
@@ -253,15 +207,22 @@ def dashboard_page():
             <div class="card">
                 <h4>🌡️ Temperature</h4>
                 <div class="metric-value">{patient['temperature']}°C</div>
+                <div class="status {'good' if 36 <= patient['temperature'] <= 37.5 else 'low'}">
+                    {'Good' if 36 <= patient['temperature'] <= 37.5 else 'Alert'}
+                </div>
             </div>
         """, unsafe_allow_html=True)
 
+    # Second row
     col4, col5, col6 = st.columns(3)
     with col4:
         st.markdown(f"""
             <div class="card">
                 <h4>BMI</h4>
                 <div class="metric-value">{round(patient['bmi'], 2)}</div>
+                <div class="status {'normal' if 18.5 <= patient['bmi'] <= 24.9 else 'low'}">
+                    {'Normal' if 18.5 <= patient['bmi'] <= 24.9 else 'Alert'}
+                </div>
             </div>
         """, unsafe_allow_html=True)
     with col5:
@@ -269,6 +230,9 @@ def dashboard_page():
             <div class="card">
                 <h4>🩸 Blood Pressure</h4>
                 <div class="metric-value">{patient['systolic']}/{patient['diastolic']}</div>
+                <div class="status {'normal' if patient['systolic']<140 and patient['diastolic']<90 else 'low'}">
+                    {'Normal' if patient['systolic']<140 and patient['diastolic']<90 else 'Alert'}
+                </div>
             </div>
         """, unsafe_allow_html=True)
     with col6:
@@ -276,6 +240,9 @@ def dashboard_page():
             <div class="card">
                 <h4>Oxygen Level</h4>
                 <div class="metric-value">{patient['oxygen']}%</div>
+                <div class="status {'normal' if patient['oxygen']>=95 else 'low'}">
+                    {'Normal' if patient['oxygen']>=95 else 'Low'}
+                </div>
             </div>
         """, unsafe_allow_html=True)
 
