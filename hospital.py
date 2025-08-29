@@ -203,6 +203,13 @@ def dashboard_page():
 # =======================================
 # Login Page
 # =======================================
+
+
+
+USERS = {
+    "doctor111": "password123",
+    "nurse222": "pass456",
+}
 def login_page():
     st.title("🏥 Hospital Login")
     username = st.text_input("Username")
