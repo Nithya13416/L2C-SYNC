@@ -1,6 +1,8 @@
-import streamlit as st
+import os
+import datetime
 import requests
-from datetime import datetime
+import streamlit as st
+from dotenv import load_dotenv
 import random
 
 # ------------------------
@@ -11,7 +13,7 @@ st.set_page_config(page_title="⌚ Smartwatch Chat Monitor", layout="centered")
 st.title("⌚ Smartwatch Health Chat")
 
 # Load Slack webhook URL from Streamlit secrets
-SLACK_WEBHOOK_URL2 = os.getenv("SLACK_WEBHOOK_URL2", "").strip()
+SLACK_WEBHOOK_URL2 = st.secrets.get("SLACK_WEBHOOK_URL2")
 
 # ------------------------
 # Simulate Smartwatch Reading
