@@ -2,6 +2,10 @@ import streamlit as st
 from datetime import datetime
 import random
 
+USERS = {
+    "doctor": "1234",
+    "nithyashree": "Webapp@1"
+}
 # ------------------------
 # Setup
 # ------------------------
