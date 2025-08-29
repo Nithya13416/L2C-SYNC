@@ -64,6 +64,24 @@ def init_db():
     conn.close()
 
 def save_uploaded_data(df):
+    # ✅ calculate BMI column
+    df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
+
+    # rename to match DB schema
+    df = df.rename(columns={
+        "Name": "name",
+        "Age": "age",
+        "Gender": "gender",
+        "Weight": "weight",
+        "Height": "height",
+        "Email": "email",
+        "HeartRate": "heart_rate",
+        "Temperature": "temperature",
+        "Oxygen": "oxygen",
+        "Systolic": "systolic",
+        "Diastolic": "diastolic"
+    })
+
     conn = sqlite3.connect("patients.db")
     df.to_sql("patients_data", conn, if_exists="replace", index=False)
     conn.close()
@@ -138,7 +156,7 @@ def patients_page():
                     st.session_state.selected_patient = row
                     st.session_state.page = "dashboard"
                     st.rerun()
-    except Exception as e:
+    except Exception:
         st.info("ℹ️ No patient data found. Please upload an Excel file.")
 
 # ---------------------------
