@@ -1,330 +1,215 @@
+import datetime
+import sqlite3
 import streamlit as st
 import pandas as pd
-import sqlite3
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, ListFlowable, ListItem
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.pagesizes import letter
 
-# ---------------------------
-# Dummy Users
-# ---------------------------
-USERS = {
-    "doctor111": "password123",
-    "nurse222": "pass456",
-}
-
-# ---------------------------
-# Session State Initialization
-# ---------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "page" not in st.session_state:
-    st.session_state.page = "login"
-if "selected_patient" not in st.session_state:
-    st.session_state.selected_patient = None
-
-# ---------------------------
-# Load CSS
-# ---------------------------
-def load_css():
-    st.markdown(
-        """
-        <style>
-        .block-container { max-width: 1100px; padding-top: 2rem; }
-        h1, h2, h3 { font-family: 'Segoe UI', sans-serif; }
-        .card {
-            background-color: white; border-radius: 16px;
-            padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            margin-bottom: 20px; text-align: center;
-        }
-        .metric-value { font-size: 26px; font-weight: bold; margin-top: 10px; }
-        .status { font-size: 14px; margin-top: 6px; padding: 4px 10px;
-                  border-radius: 12px; display: inline-block; }
-        .normal { background: #d4f8d4; color: #2e7d32; }
-        .good { background: #d0f0ff; color: #0277bd; }
-        .low { background: #ffe0e0; color: #c62828; }
-        .bubble {
-            display:inline-block; padding:10px 20px; margin:5px;
-            border-radius:20px; font-weight:bold; color:white;
-        }
-        .green { background:#2e7d32; }
-        .orange { background:#f57c00; }
-        .red { background:#c62828; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ---------------------------
+# =======================================
 # Database Functions
-# ---------------------------
-def init_db():
-    conn = sqlite3.connect("patients.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS patients_data (
-            name TEXT, age INTEGER, gender TEXT,
-            weight REAL, height REAL, email TEXT,
-            heart_rate INTEGER, temperature REAL,
-            oxygen INTEGER, systolic INTEGER,
-            diastolic INTEGER, bmi REAL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
+# =======================================
 def save_uploaded_data(df):
-    # Calculate BMI
-    df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
-
-    # Rename to match DB schema
-    df = df.rename(columns={
-        "Name": "name",
-        "Age": "age",
-        "Gender": "gender",
-        "Weight": "weight",
-        "Height": "height",
-        "Email": "email",
-        "HeartRate": "heart_rate",
-        "Temperature": "temperature",
-        "Oxygen": "oxygen",
-        "Systolic": "systolic",
-        "Diastolic": "diastolic"
-    })
-
     conn = sqlite3.connect("patients.db")
+
+    # Overwrite main table
     df.to_sql("patients_data", conn, if_exists="replace", index=False)
+
+    # Append with timestamp to history
+    df_hist = df.copy()
+    df_hist["uploaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df_hist.to_sql("patients_data_history", conn, if_exists="append", index=False)
+
     conn.close()
 
-def get_patients():
+
+def get_patient_history(name):
     conn = sqlite3.connect("patients.db")
-    df = pd.read_sql("SELECT * FROM patients_data ORDER BY name ASC", conn)  # ✅ Sorted alphabetically
+    query = "SELECT * FROM patients_data_history WHERE name = ?"
+    df = pd.read_sql(query, conn, params=(name,))
     conn.close()
     return df
 
-# ---------------------------
-# Health Check Logic
-# ---------------------------
-def check_vitals(row):
-    issues = []
 
-    if row["heart_rate"] < 60 or row["heart_rate"] > 100:
-        issues.append("Heart Rate")
-    if row["temperature"] < 36 or row["temperature"] > 37.5:
-        issues.append("Temperature")
-    if row["oxygen"] < 95:
-        issues.append("Oxygen")
-    if row["systolic"] >= 140 or row["diastolic"] >= 90:
-        issues.append("Blood Pressure")
-    if row["bmi"] < 18.5 or row["bmi"] > 24.9:
-        issues.append("BMI")
+# =======================================
+# Risk & Explanation Helpers
+# =======================================
+def overall_risk_label(n_issues: int) -> str:
+    if n_issues == 0:
+        return "Normal"
+    elif n_issues == 1:
+        return "Mild Alert"
+    else:
+        return "Critical Alert"
 
-    return issues
 
-# ---------------------------
+def explain_heart_rate(hr: float):
+    normal = "60–100 BPM"
+    if hr < 60:
+        return ("Low", normal,
+                "Below normal (bradycardia). Could be athlete training, fatigue, dehydration, or meds.",
+                ["Re-check at rest", "Hydrate", "Seek care if dizziness or chest pain"])
+    elif hr > 100:
+        return ("High", normal,
+                "Above normal (tachycardia). Could be stress, fever, dehydration, or stimulants.",
+                ["Rest", "Hydrate", "Avoid caffeine", "Seek care if >120 BPM or with symptoms"])
+    else:
+        return ("Normal", normal, "Within expected range.", [])
+
+
+def explain_temperature(temp_c: float):
+    normal = "36.0–37.5 °C"
+    if temp_c < 36.0:
+        return ("Low", normal, "Below normal; may be error, cold exposure, or thyroid issue.",
+                ["Re-check", "Warm up", "Consult doctor if persistent"])
+    elif temp_c > 37.5:
+        return ("High", normal, "Fever; may indicate infection.",
+                ["Hydrate", "Rest", "Take fever reducer if advised", "Seek care if >38.5 °C"])
+    else:
+        return ("Normal", normal, "Within expected range.", [])
+
+
+def explain_oxygen(spo2: float):
+    normal = "≥95 %"
+    if spo2 < 92:
+        return ("Low", normal, "Low oxygen; possible lung/heart issue.",
+                ["Sit upright", "Re-check", "Seek urgent care if symptoms"])
+    elif spo2 < 95:
+        return ("Borderline", normal, "Slightly low; may be transient.",
+                ["Re-check after 5 min", "Ensure good sensor contact"])
+    else:
+        return ("Normal", normal, "Within expected range.", [])
+
+
+def explain_bp(sys: float, dia: float):
+    normal = "<140 / <90 mmHg"
+    if sys >= 140 or dia >= 90:
+        return ("High", normal, "Elevated BP; increases long-term cardiovascular risk.",
+                ["Re-check after 5 min", "Reduce salt/stress", "Consult doctor"])
+    else:
+        return ("Normal", normal, "Within target range.", [])
+
+
+def explain_bmi(bmi: float):
+    normal = "18.5–24.9"
+    if bmi < 18.5:
+        return ("Low", normal, "Underweight; risk of nutrient deficiency.",
+                ["Review diet", "Consider nutritionist"])
+    elif bmi > 24.9:
+        return ("High", normal, "Overweight; higher metabolic and heart risk.",
+                ["Increase activity", "Balanced diet", "Weight management support"])
+    else:
+        return ("Normal", normal, "Within healthy range.", [])
+
+
+def build_vital_explanations(p):
+    items = []
+    hr_status, hr_norm, hr_meaning, hr_actions = explain_heart_rate(float(p["heart_rate"]))
+    items.append(("Heart Rate", f"{p['heart_rate']} BPM", hr_status, hr_norm, hr_meaning, hr_actions))
+
+    t_status, t_norm, t_meaning, t_actions = explain_temperature(float(p["temperature"]))
+    items.append(("Temperature", f"{p['temperature']} °C", t_status, t_norm, t_meaning, t_actions))
+
+    ox_status, ox_norm, ox_meaning, ox_actions = explain_oxygen(float(p["oxygen"]))
+    items.append(("Oxygen", f"{p['oxygen']} %", ox_status, ox_norm, ox_meaning, ox_actions))
+
+    bp_status, bp_norm, bp_meaning, bp_actions = explain_bp(float(p["systolic"]), float(p["diastolic"]))
+    items.append(("Blood Pressure", f"{p['systolic']}/{p['diastolic']} mmHg", bp_status, bp_norm, bp_meaning, bp_actions))
+
+    bmi_status, bmi_norm, bmi_meaning, bmi_actions = explain_bmi(float(p["bmi"]))
+    items.append(("BMI", f"{round(float(p['bmi']), 2)}", bmi_status, bmi_norm, bmi_meaning, bmi_actions))
+
+    return items
+
+
+# =======================================
 # PDF Report Generator
-# ---------------------------
+# =======================================
 def generate_report(patient):
     filename = f"{patient['name']}_report.pdf"
     doc = SimpleDocTemplate(filename, pagesize=letter)
     styles = getSampleStyleSheet()
     story = []
 
-    story.append(Paragraph(f"Patient Report - {patient['name']}", styles["Title"]))
+    story.append(Paragraph(f"<b>Patient Report: {patient['name']}</b>", styles["Heading1"]))
     story.append(Spacer(1, 12))
 
-    for field in patient.index:
-        story.append(Paragraph(f"<b>{field.capitalize()}</b>: {patient[field]}", styles["Normal"]))
+    # Overall risk
+    issues = build_vital_explanations(patient)
+    risk = overall_risk_label(sum(1 for i in issues if i[2] != "Normal"))
+    story.append(Paragraph(f"Overall Risk Level: <b>{risk}</b>", styles["Heading2"]))
+    story.append(Spacer(1, 12))
+
+    # Vital explanations
+    for (label, value, status, normal, meaning, actions) in issues:
+        story.append(Paragraph(f"<b>{label}</b>: {value} ({status})", styles["Heading3"]))
+        story.append(Paragraph(f"Expected: {normal}", styles["Normal"]))
+        story.append(Paragraph(f"Meaning: {meaning}", styles["Normal"]))
+        if actions:
+            story.append(Paragraph("Suggested Actions:", styles["Italic"]))
+            story.append(ListFlowable(
+                [ListItem(Paragraph(a, styles["Normal"])) for a in actions],
+                bulletType="bullet"
+            ))
         story.append(Spacer(1, 8))
+
+    # Disclaimer
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("<b>Notes</b>", styles["Heading2"]))
+    story.append(Paragraph(
+        "This report is informational and does not replace clinical judgment. "
+        "If severe symptoms occur (chest pain, severe shortness of breath, fainting), seek medical attention immediately.",
+        styles["Italic"]
+    ))
 
     doc.build(story)
     return filename
 
-# ---------------------------
-# Login Page
-# ---------------------------
-def login_page():
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.image(
-            "https://img.freepik.com/free-vector/health-professional-team-with-heart_23-2148503275.jpg",
-            use_container_width=True
-        )
-    with col2:
-        st.markdown("### Sign in")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
 
-        if st.button("🔐 Sign In with Username"):
-            if username in USERS and USERS[username] == password:
-                st.session_state.logged_in = True
-                st.session_state.page = "patients"
-                st.success("Login successful ✅")
-                st.rerun()
-            else:
-                st.error("Invalid username or password ❌")
-
-# ---------------------------
-# Patients Page
-# ---------------------------
-def patients_page():
-    st.title("👨‍⚕️ My Patients")
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🔙 Logout"):
-            st.session_state.logged_in = False
-            st.session_state.page = "login"
-            st.rerun()
-    with col2:
-        if st.button("🔑 Back to Login"):
-            st.session_state.page = "login"
-            st.rerun()
-
-    # Upload Excel file
-    st.subheader("📂 Upload Patient Data (Excel)")
-    uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
-
-    if uploaded_file is not None:
-        df = pd.read_excel(uploaded_file)
-        save_uploaded_data(df)
-        st.success("✅ Data uploaded & saved successfully!")
-
-        # -------------------- SUMMARY COUNTERS --------------------
-        df = get_patients()
-        normal_count, medium_count, risk_count = 0, 0, 0
-        for _, row in df.iterrows():
-            issues = check_vitals(row)
-            if len(issues) == 0:
-                normal_count += 1
-            elif len(issues) == 1:
-                medium_count += 1
-            else:
-                risk_count += 1
-
-        st.markdown(f"""
-            <div class="bubble green">✅ Normal: {normal_count}</div>
-            <div class="bubble orange">⚠️ Medium: {medium_count}</div>
-            <div class="bubble red">🚨 At Risk: {risk_count}</div>
-        """, unsafe_allow_html=True)
-
-        st.dataframe(df)
-
-    # Show patient list
-    try:
-        df = get_patients()
-        st.markdown("### Patient List:")
-        for i, row in df.iterrows():
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.write(f"👤 {row['name']} ({row['age']} yrs)")
-            with col2:
-                if st.button("View Metrics", key=f"view_{i}"):
-                    st.session_state.selected_patient = row
-                    st.session_state.page = "dashboard"
-                    st.rerun()
-    except Exception:
-        st.info("ℹ️ No patient data found. Please upload an Excel file.")
-
-# ---------------------------
+# =======================================
 # Dashboard Page
-# ---------------------------
+# =======================================
 def dashboard_page():
-    load_css()
     patient = st.session_state.selected_patient
     st.title("📊 Smartwatch Health Dashboard")
 
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🔙 Return to Patients"):
-            st.session_state.page = "patients"
-            st.rerun()
-    with col2:
-        if st.button("🔑 Back to Login"):
-            st.session_state.page = "login"
-            st.rerun()
+    if st.button("🔙 Return to Patients"):
+        st.session_state.page = "patients"
+        st.rerun()
 
     st.subheader(f"Patient: {patient['name']}")
 
-    # ✅ Download Report
-    if st.button("📥 Download Report"):
-        filename = generate_report(patient)
-        with open(filename, "rb") as f:
-            st.download_button("Download PDF", f, file_name=filename)
+    # History
+    df_hist = get_patient_history(patient['name'])
 
-    # ---- Vitals cards ----
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-            <div class="card">
-                <h4>❤️ Heart Rate</h4>
-                <div class="metric-value">{patient['heart_rate']} BPM</div>
-                <div class="status {'normal' if 60 <= patient['heart_rate'] <= 100 else 'low'}">
-                    {'Normal' if 60 <= patient['heart_rate'] <= 100 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-            <div class="card">
-                <h4>👤 Patient Info</h4>
-                <p>{patient['name']}</p>
-                <p>Emergency: {patient['email']}</p>
-                <p>Age: {patient['age']} | Gender: {patient['gender']}</p>
-                <p>Weight: {patient['weight']} | Height: {patient['height']}</p>
-            </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-            <div class="card">
-                <h4>🌡️ Temperature</h4>
-                <div class="metric-value">{patient['temperature']}°C</div>
-                <div class="status {'good' if 36 <= patient['temperature'] <= 37.5 else 'low'}">
-                    {'Good' if 36 <= patient['temperature'] <= 37.5 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    # Risk status
+    issues = build_vital_explanations(patient)
+    n_issues = sum(1 for i in issues if i[2] != "Normal")
+    risk = overall_risk_label(n_issues)
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        st.markdown(f"""
-            <div class="card">
-                <h4>BMI</h4>
-                <div class="metric-value">{round(patient['bmi'], 2)}</div>
-                <div class="status {'normal' if 18.5 <= patient['bmi'] <= 24.9 else 'low'}">
-                    {'Normal' if 18.5 <= patient['bmi'] <= 24.9 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col5:
-        st.markdown(f"""
-            <div class="card">
-                <h4>🩸 Blood Pressure</h4>
-                <div class="metric-value">{patient['systolic']}/{patient['diastolic']}</div>
-                <div class="status {'normal' if patient['systolic']<140 and patient['diastolic']<90 else 'low'}">
-                    {'Normal' if patient['systolic']<140 and patient['diastolic']<90 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col6:
-        st.markdown(f"""
-            <div class="card">
-                <h4>Oxygen Level</h4>
-                <div class="metric-value">{patient['oxygen']}%</div>
-                <div class="status {'normal' if patient['oxygen']>=95 else 'low'}">
-                    {'Normal' if patient['oxygen']>=95 else 'Low'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    if risk == "Normal":
+        st.success("✅ Status: Normal")
+    elif risk == "Mild Alert":
+        st.warning(f"⚠️ Status: Mild Alert ({[i[0] for i in issues if i[2] != 'Normal'][0]})")
+    else:
+        st.error(f"🚨 Status: Critical Alert (Problems with {', '.join([i[0] for i in issues if i[2] != 'Normal'])})")
 
-# ---------------------------
-# Main Router
-# ---------------------------
-init_db()
+    # Trends
+    if not df_hist.empty:
+        st.markdown("### 📈 Health Trends")
+        st.line_chart(df_hist.set_index("uploaded_at")[["heart_rate", "temperature", "oxygen"]])
 
-if st.session_state.page == "login":
-    login_page()
-elif st.session_state.page == "patients":
-    patients_page()
-elif st.session_state.page == "dashboard":
-    dashboard_page()
+
+# =======================================
+# Login Page
+# =======================================
+def login_page():
+    st.title("🏥 Hospital Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username == "admin" and password == "admin":  # simple login
+            st.session_state.page = "patients"
+            st.rerun()
+        else:
+            st.error("Invalid credentials")
