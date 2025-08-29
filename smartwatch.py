@@ -13,7 +13,8 @@ st.set_page_config(page_title="⌚ Smartwatch Chat Monitor", layout="centered")
 st.title("⌚ Smartwatch Health Chat")
 
 # Load Slack webhook URL from Streamlit secrets
-SLACK_WEBHOOK_URL2 = st.secrets.get("SLACK_WEBHOOK_URL2")
+SLACK_WEBHOOK_URL2 = os.getenv("SLACK_WEBHOOK_URL2", "").strip()
+
 
 # ------------------------
 # Simulate Smartwatch Reading
@@ -34,7 +35,7 @@ def get_random_reading():
 # ------------------------
 
 def send_to_slack(reading):
-    if not SLACK_WEBHOOK_URL:
+    if not SLACK_WEBHOOK_URL2:
         return {"status": "error", "message": "Slack webhook not configured"}
 
     message = (
@@ -46,7 +47,7 @@ def send_to_slack(reading):
     )
 
     payload = {"text": message}
-    response = requests.post(SLACK_WEBHOOK_URL, json=payload)
+    response = requests.post(SLACK_WEBHOOK_URL2, json=payload)
     return {"status": "ok" if response.status_code == 200 else "error", "code": response.status_code}
 
 # ------------------------
