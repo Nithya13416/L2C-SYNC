@@ -2,29 +2,26 @@ import streamlit as st
 from datetime import datetime
 import random
 
+# ------------------------
+# User credentials
+# ------------------------
 USERS = {
-    "doctor": "1234",
+    "doctor111": "password123",
     "nithyashree": "Webapp@1"
 }
-# ------------------------
-# Setup
-# ------------------------
-st.set_page_config(page_title="⌚ Smartwatch Health Dashboard", layout="wide")
 
 # ------------------------
-# Fake user & patient data
+# Default patient data
 # ------------------------
-USERS = {"doctor111": "password123"}
-
 PATIENTS = [
     {"name": "Mr X", "age": 54, "gender": "Male", "weight": 62, "height": 168, "contact": "x_contact@gmail.com"},
     {"name": "Mr Y", "age": 47, "gender": "Male", "weight": 70, "height": 172, "contact": "y_contact@gmail.com"},
     {"name": "Mr Z", "age": 60, "gender": "Male", "weight": 80, "height": 175, "contact": "z_contact@gmail.com"},
-    {"name": "saif ben hmida", "age": 54, "gender": "Male", "weight": 62, "height": 168, "contact": "ss@gmail.com"},
+    {"name": "Saif Ben Hmida", "age": 54, "gender": "Male", "weight": 62, "height": 168, "contact": "ss@gmail.com"},
 ]
 
 # ------------------------
-# Utility
+# Utility for random metrics
 # ------------------------
 def generate_metrics():
     return {
@@ -51,7 +48,7 @@ if "patients" not in st.session_state:
 # ------------------------
 # Login Page
 # ------------------------
-if not st.session_state.logged_in:
+if st.session_state.page == "login":
     col1, col2 = st.columns([2, 1])
     with col1:
         st.image(
@@ -67,6 +64,7 @@ if not st.session_state.logged_in:
                 st.session_state.logged_in = True
                 st.session_state.page = "patients"
                 st.success("Login successful ✅")
+                st.rerun()
             else:
                 st.error("Invalid username or password ❌")
     st.stop()
@@ -76,6 +74,8 @@ if not st.session_state.logged_in:
 # ------------------------
 if st.session_state.page == "patients":
     st.sidebar.title("Dashboard")
+    st.sidebar.button("🚪 Logout", on_click=lambda: st.session_state.update({"logged_in": False, "page": "login"}))
+
     st.title("👨‍⚕️ My Patients")
 
     # --- Search bar ---
@@ -105,6 +105,7 @@ if st.session_state.page == "patients":
                 }
                 st.session_state.patients.append(new_patient)
                 st.success(f"Patient **{name}** added successfully!")
+                st.rerun()
 
     st.markdown("---")
 
@@ -112,10 +113,11 @@ if st.session_state.page == "patients":
     for p in st.session_state.patients:
         if search.lower() in p["name"].lower():
             col1, col2 = st.columns([3, 1])
-            col1.markdown(f"**{p['name']}**")
-            if col2.button("View User Metrics", key=p["name"]):
+            col1.markdown(f"**{p['name']}** ({p['age']} yrs, {p['gender']})")
+            if col2.button("📊 View Metrics", key=p["name"]):
                 st.session_state.selected_patient = p
                 st.session_state.page = "details"
+                st.rerun()
 
 # ------------------------
 # Patient Details Page
@@ -124,7 +126,9 @@ elif st.session_state.page == "details":
     patient = st.session_state.selected_patient
     metrics = generate_metrics()
 
-    st.sidebar.button("⬅ Return", on_click=lambda: st.session_state.update({"page": "patients"}))
+    st.sidebar.button("⬅ Back to Patients", on_click=lambda: st.session_state.update({"page": "patients"}))
+    st.sidebar.button("🚪 Logout", on_click=lambda: st.session_state.update({"logged_in": False, "page": "login"}))
+
     st.title(f"👋 Welcome Back Doctor")
     st.markdown(f"### {patient['name']}")
     st.markdown(f"📧 Emergency Contact: {patient['contact']}")
