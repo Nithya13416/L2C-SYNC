@@ -1,5 +1,5 @@
 import os
-import datetime
+from datetime import datetime
 import requests
 import streamlit as st
 from dotenv import load_dotenv
