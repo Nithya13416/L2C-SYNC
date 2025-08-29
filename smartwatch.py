@@ -1,43 +1,24 @@
 import streamlit as st
 
-# -------------------
+# ---------------------------
 # Dummy Users
-# -------------------
-USERS = {"doctor111": "password123"}
-
-# -------------------
-# Dummy Patients
-# -------------------
-PATIENTS = {
-    "saif": {
-        "name": "saif ben hmida",
-        "email": "ss@gmail.com",
-        "age": 54,
-        "gender": "Men",
-        "weight": 62,
-        "height": 168,
-        "heart_rate": 77,
-        "temperature": 36,
-        "bmi": 21.97,
-        "bp_sys": 139,
-        "bp_dia": 79,
-        "oxygen": 93,
-    }
+# ---------------------------
+USERS = {
+    "doctor111": "password123",
+    "nurse222": "pass456",
 }
 
-# -------------------
-# Session Init
-# -------------------
+# ---------------------------
+# Session State Initialization
+# ---------------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "page" not in st.session_state:
     st.session_state.page = "login"
-if "selected_patient" not in st.session_state:
-    st.session_state.selected_patient = None
 
-# -------------------
-# LOGIN PAGE
-# -------------------
+# ---------------------------
+# Login Page
+# ---------------------------
 def login_page():
     col1, col2 = st.columns([2, 1])
     with col1:
@@ -49,100 +30,85 @@ def login_page():
         st.markdown("### Sign in")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
+
         if st.button("🔐 Sign In with Username"):
             if username in USERS and USERS[username] == password:
                 st.session_state.logged_in = True
                 st.session_state.page = "patients"
                 st.success("Login successful ✅")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid username or password ❌")
 
-# -------------------
-# PATIENT SELECTION PAGE
-# -------------------
+# ---------------------------
+# Patients List Page
+# ---------------------------
 def patients_page():
-    st.title("👩‍⚕️ Patients List")
-    for pid, details in PATIENTS.items():
-        if st.button(f"📂 {details['name']}"):
-            st.session_state.selected_patient = pid
+    st.title("👨‍⚕️ Patients List")
+
+    if st.button("🔙 Logout"):
+        st.session_state.logged_in = False
+        st.session_state.page = "login"
+        st.rerun()
+
+    # Example patients
+    patients = [
+        {"name": "Saif Ben Hmida", "age": 54, "gender": "Male", "weight": 62, "height": 168, "email": "ss@gmail.com"},
+        {"name": "John Doe", "age": 45, "gender": "Male", "weight": 75, "height": 172, "email": "john@gmail.com"},
+    ]
+
+    for i, patient in enumerate(patients):
+        if st.button(f"📋 View {patient['name']}'s Dashboard", key=i):
+            st.session_state.selected_patient = patient
             st.session_state.page = "dashboard"
-            st.experimental_rerun()
+            st.rerun()
 
-# -------------------
-# DASHBOARD PAGE
-# -------------------
+# ---------------------------
+# Dashboard Page
+# ---------------------------
 def dashboard_page():
-    patient = PATIENTS[st.session_state.selected_patient]
+    patient = st.session_state.selected_patient
 
-    # Top navigation
-    col1, col2, col3 = st.columns([1, 3, 1])
-    with col1:
-        if st.button("⬅️ Return"):
-            st.session_state.page = "patients"
-            st.experimental_rerun()
-    with col2:
-        st.subheader("Dashboard")
-    with col3:
-        st.text_input("🔍 Search...")
+    st.title("📊 Smartwatch Health Dashboard")
 
-    st.markdown(f"## Welcome Back Doctor")
+    if st.button("🔙 Return"):
+        st.session_state.page = "patients"
+        st.rerun()
 
-    # Layout
+    st.subheader(f"Welcome Back Doctor - Patient: {patient['name']}")
+
+    # Cards Layout
     col1, col2, col3 = st.columns(3)
-
-    # Heart Rate
     with col1:
-        st.markdown("### Heart Rate")
-        st.metric(label="", value=f"{patient['heart_rate']} BPM")
-        st.success("Normal" if 60 <= patient['heart_rate'] <= 100 else "Abnormal")
-
-    # Patient Info (Center)
+        st.markdown("#### Heart Rate")
+        st.metric(label="Status", value="77 BPM", delta="Normal")
     with col2:
-        st.markdown("### Patient Info")
-        st.markdown(f"**{patient['name']}**")
-        st.markdown(f"📧 {patient['email']}")
-        st.write(f"**Age:** {patient['age']} | **Gender:** {patient['gender']}")
-        st.write(f"**Weight:** {patient['weight']} | **Height:** {patient['height']}")
-
-    # Temperature
+        st.markdown("#### Patient Info")
+        st.text(patient["name"])
+        st.text(f"Emergency Contact : {patient['email']}")
+        st.text(f"Age: {patient['age']} | Gender: {patient['gender']}")
+        st.text(f"Weight: {patient['weight']} | Height: {patient['height']}")
     with col3:
-        st.markdown("### Temperature")
-        st.metric(label="", value=f"{patient['temperature']}°C")
-        st.success("Good" if 36 <= patient['temperature'] <= 37 else "Bad")
+        st.markdown("#### Temperature")
+        st.metric(label="Body Temp", value="36°C", delta="Good")
 
-    # Second row
     col4, col5, col6 = st.columns(3)
-
-    # BMI
     with col4:
-        st.markdown("### BMI")
-        st.metric(label="", value=f"{patient['bmi']:.2f}")
-        st.success("Normal" if 18.5 <= patient['bmi'] <= 24.9 else "Abnormal")
-
-    # Blood Pressure
+        st.markdown("#### BMI")
+        st.metric(label="Index", value="21.97", delta="Normal")
     with col5:
-        st.markdown("### Systolic & Diastolic Pressure")
-        st.write(f"**Sys:** {patient['bp_sys']}")
-        st.write(f"**Dia:** {patient['bp_dia']}")
-        if patient['bp_sys'] < 140 and patient['bp_dia'] < 90:
-            st.success("Normal")
-        else:
-            st.error("High")
-
-    # Oxygen
+        st.markdown("#### Blood Pressure")
+        st.metric(label="SYS/DIA", value="139/79", delta="Normal")
     with col6:
-        st.markdown("### Oxygen Level")
-        st.metric(label="", value=f"{patient['oxygen']}%")
-        st.success("Good" if patient['oxygen'] >= 95 else "Low")
+        st.markdown("#### Oxygen Level")
+        st.metric(label="SpO₂", value="93%", delta="Low")
 
-# -------------------
-# MAIN APP
-# -------------------
-if not st.session_state.logged_in:
+# ---------------------------
+# Main Router
+# ---------------------------
+if st.session_state.page == "login":
     login_page()
-else:
-    if st.session_state.page == "patients":
-        patients_page()
-    elif st.session_state.page == "dashboard":
-        dashboard_page()
+elif st.session_state.page == "patients":
+    patients_page()
+elif st.session_state.page == "dashboard":
+    dashboard_page()
