@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import letter
 
 # ---------------------------
 # Dummy Users
@@ -21,7 +24,7 @@ if "selected_patient" not in st.session_state:
     st.session_state.selected_patient = None
 
 # ---------------------------
-# Load CSS for styling
+# Load CSS
 # ---------------------------
 def load_css():
     st.markdown(
@@ -40,13 +43,20 @@ def load_css():
         .normal { background: #d4f8d4; color: #2e7d32; }
         .good { background: #d0f0ff; color: #0277bd; }
         .low { background: #ffe0e0; color: #c62828; }
+        .bubble {
+            display:inline-block; padding:10px 20px; margin:5px;
+            border-radius:20px; font-weight:bold; color:white;
+        }
+        .green { background:#2e7d32; }
+        .orange { background:#f57c00; }
+        .red { background:#c62828; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 # ---------------------------
-# Database Helper Functions
+# Database Functions
 # ---------------------------
 def init_db():
     conn = sqlite3.connect("patients.db")
@@ -64,10 +74,10 @@ def init_db():
     conn.close()
 
 def save_uploaded_data(df):
-    # ✅ calculate BMI column
+    # Calculate BMI
     df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
 
-    # rename to match DB schema
+    # Rename to match DB schema
     df = df.rename(columns={
         "Name": "name",
         "Age": "age",
@@ -88,9 +98,47 @@ def save_uploaded_data(df):
 
 def get_patients():
     conn = sqlite3.connect("patients.db")
-    df = pd.read_sql("SELECT * FROM patients_data", conn)
+    df = pd.read_sql("SELECT * FROM patients_data ORDER BY name ASC", conn)  # ✅ Sorted alphabetically
     conn.close()
     return df
+
+# ---------------------------
+# Health Check Logic
+# ---------------------------
+def check_vitals(row):
+    issues = []
+
+    if row["heart_rate"] < 60 or row["heart_rate"] > 100:
+        issues.append("Heart Rate")
+    if row["temperature"] < 36 or row["temperature"] > 37.5:
+        issues.append("Temperature")
+    if row["oxygen"] < 95:
+        issues.append("Oxygen")
+    if row["systolic"] >= 140 or row["diastolic"] >= 90:
+        issues.append("Blood Pressure")
+    if row["bmi"] < 18.5 or row["bmi"] > 24.9:
+        issues.append("BMI")
+
+    return issues
+
+# ---------------------------
+# PDF Report Generator
+# ---------------------------
+def generate_report(patient):
+    filename = f"{patient['name']}_report.pdf"
+    doc = SimpleDocTemplate(filename, pagesize=letter)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(f"Patient Report - {patient['name']}", styles["Title"]))
+    story.append(Spacer(1, 12))
+
+    for field in patient.index:
+        story.append(Paragraph(f"<b>{field.capitalize()}</b>: {patient[field]}", styles["Normal"]))
+        story.append(Spacer(1, 8))
+
+    doc.build(story)
+    return filename
 
 # ---------------------------
 # Login Page
@@ -141,9 +189,28 @@ def patients_page():
         df = pd.read_excel(uploaded_file)
         save_uploaded_data(df)
         st.success("✅ Data uploaded & saved successfully!")
+
+        # -------------------- SUMMARY COUNTERS --------------------
+        df = get_patients()
+        normal_count, medium_count, risk_count = 0, 0, 0
+        for _, row in df.iterrows():
+            issues = check_vitals(row)
+            if len(issues) == 0:
+                normal_count += 1
+            elif len(issues) == 1:
+                medium_count += 1
+            else:
+                risk_count += 1
+
+        st.markdown(f"""
+            <div class="bubble green">✅ Normal: {normal_count}</div>
+            <div class="bubble orange">⚠️ Medium: {medium_count}</div>
+            <div class="bubble red">🚨 At Risk: {risk_count}</div>
+        """, unsafe_allow_html=True)
+
         st.dataframe(df)
 
-    # Show patient list if DB has data
+    # Show patient list
     try:
         df = get_patients()
         st.markdown("### Patient List:")
@@ -165,7 +232,6 @@ def patients_page():
 def dashboard_page():
     load_css()
     patient = st.session_state.selected_patient
-
     st.title("📊 Smartwatch Health Dashboard")
 
     col1, col2 = st.columns([1, 1])
@@ -180,7 +246,13 @@ def dashboard_page():
 
     st.subheader(f"Patient: {patient['name']}")
 
-    # First row
+    # ✅ Download Report
+    if st.button("📥 Download Report"):
+        filename = generate_report(patient)
+        with open(filename, "rb") as f:
+            st.download_button("Download PDF", f, file_name=filename)
+
+    # ---- Vitals cards ----
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"""
@@ -213,7 +285,6 @@ def dashboard_page():
             </div>
         """, unsafe_allow_html=True)
 
-    # Second row
     col4, col5, col6 = st.columns(3)
     with col4:
         st.markdown(f"""
