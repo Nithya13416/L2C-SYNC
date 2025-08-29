@@ -1,10 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import datetime
-from io import BytesIO
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
+from datetime import datetime
 
 # ---------------------------
 # Dummy Users
@@ -61,7 +58,8 @@ def init_db():
             weight REAL, height REAL, email TEXT,
             heart_rate INTEGER, temperature REAL,
             oxygen INTEGER, systolic INTEGER,
-            diastolic INTEGER, bmi REAL, uploaded_at TEXT
+            diastolic INTEGER, bmi REAL,
+            uploaded_at TEXT
         )
     """)
     conn.commit()
@@ -70,7 +68,6 @@ def init_db():
 def save_uploaded_data(df):
     # ✅ calculate BMI column
     df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
-    df["uploaded_at"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # rename to match DB schema
     df = df.rename(columns={
@@ -87,6 +84,9 @@ def save_uploaded_data(df):
         "Diastolic": "diastolic"
     })
 
+    # add uploaded_at timestamp
+    df["uploaded_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     conn = sqlite3.connect("patients.db")
     df.to_sql("patients_data", conn, if_exists="append", index=False)
     conn.close()
@@ -97,26 +97,11 @@ def get_patients():
     conn.close()
     return df
 
-# ---------------------------
-# PDF Export Helper
-# ---------------------------
-def generate_pdf(patient):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    textobject = c.beginText(50, 750)
-    textobject.setFont("Helvetica", 12)
-
-    textobject.textLine(f"Patient Report - {patient['name']}")
-    textobject.textLine(f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    textobject.textLine("")
-    for key, value in patient.items():
-        textobject.textLine(f"{key}: {value}")
-
-    c.drawText(textobject)
-    c.showPage()
-    c.save()
-    buffer.seek(0)
-    return buffer
+def get_patient_history(name):
+    conn = sqlite3.connect("patients.db")
+    df = pd.read_sql("SELECT * FROM patients_data WHERE name = ?", conn, params=(name,))
+    conn.close()
+    return df
 
 # ---------------------------
 # Login Page
@@ -172,20 +157,6 @@ def patients_page():
     # Show patient list if DB has data
     try:
         df = get_patients()
-
-        # 🔥 Summary bar: how many are alert?
-        normal_count = df[
-            (df["heart_rate"].between(60, 100)) &
-            (df["temperature"].between(36, 37.5)) &
-            (df["oxygen"] >= 95) &
-            (df["systolic"] < 140) & (df["diastolic"] < 90)
-        ].shape[0]
-        alert_count = len(df) - normal_count
-
-        col1, col2 = st.columns(2)
-        col1.metric("✅ Normal Patients", normal_count)
-        col2.metric("⚠️ Alert Patients", alert_count, delta=alert_count)
-
         st.markdown("### Patient List:")
         for i, row in df.iterrows():
             col1, col2 = st.columns([3, 1])
@@ -200,58 +171,113 @@ def patients_page():
         st.info("ℹ️ No patient data found. Please upload an Excel file.")
 
 # ---------------------------
+# Vital Check Helper
+# ---------------------------
+def check_vitals(row):
+    issues = []
+
+    # Heart rate
+    if row["heart_rate"] < 60 or row["heart_rate"] > 100:
+        issues.append("Heart Rate")
+
+    # Temperature
+    if row["temperature"] < 36 or row["temperature"] > 37.5:
+        issues.append("Temperature")
+
+    # Oxygen
+    if row["oxygen"] < 95:
+        issues.append("Oxygen")
+
+    # Blood pressure
+    if row["systolic"] >= 140 or row["diastolic"] >= 90:
+        issues.append("Blood Pressure")
+
+    # BMI
+    if row["bmi"] < 18.5 or row["bmi"] > 24.9:
+        issues.append("BMI")
+
+    return issues
+
+# ---------------------------
 # Dashboard Page
 # ---------------------------
 def dashboard_page():
     load_css()
     patient = st.session_state.selected_patient
-
     st.title("📊 Smartwatch Health Dashboard")
 
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        if st.button("🔙 Return to Patients"):
-            st.session_state.page = "patients"
-            st.rerun()
-    with col2:
-        if st.button("🔑 Back to Login"):
-            st.session_state.page = "login"
-            st.rerun()
-    with col3:
-        # 🔽 Export options
-        csv = patient.to_frame().T.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ Download CSV", csv, "report.csv", "text/csv")
-
-        pdf_buf = generate_pdf(patient)
-        st.download_button("⬇️ Download PDF", pdf_buf, "report.pdf", "application/pdf")
+    if st.button("🔙 Return to Patients"):
+        st.session_state.page = "patients"
+        st.rerun()
 
     st.subheader(f"Patient: {patient['name']}")
 
-    # Profile section
-    st.image("https://cdn-icons-png.flaticon.com/512/2922/2922510.png", width=120)
-    st.write(f"**Age:** {patient['age']} | **Gender:** {patient['gender']}")
-    st.write(f"**Weight:** {patient['weight']} kg | **Height:** {patient['height']} cm")
-    st.write(f"**Emergency Contact:** {patient['email']}")
+    # Get patient history
+    df_hist = get_patient_history(patient['name'])
 
-    # ✅ Vital Cards
+    # ---- NEW ALERT LOGIC ----
+    issues = check_vitals(patient)
+    if len(issues) == 0:
+        st.success("✅ Status: Normal")
+    elif len(issues) == 1:
+        st.warning(f"⚠️ Status: Mild Alert ({issues[0]})")
+    else:
+        st.error(f"🚨 Status: Critical Alert (Problems with {', '.join(issues)})")
+
+    # Trends
+    if not df_hist.empty:
+        st.markdown("### 📈 Health Trends")
+        st.line_chart(df_hist.set_index("uploaded_at")[["heart_rate", "temperature", "oxygen"]])
+
+    # Show detailed metrics (cards)
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("❤️ Heart Rate", f"{patient['heart_rate']} BPM",
-                  "Normal" if 60 <= patient['heart_rate'] <= 100 else "⚠️")
+        st.markdown(f"""
+            <div class="card">
+                <h4>❤️ Heart Rate</h4>
+                <div class="metric-value">{patient['heart_rate']} BPM</div>
+            </div>
+        """, unsafe_allow_html=True)
     with col2:
-        st.metric("🌡️ Temperature", f"{patient['temperature']} °C",
-                  "Good" if 36 <= patient['temperature'] <= 37.5 else "⚠️")
+        st.markdown(f"""
+            <div class="card">
+                <h4>👤 Patient Info</h4>
+                <p>{patient['name']}</p>
+                <p>Emergency: {patient['email']}</p>
+                <p>Age: {patient['age']} | Gender: {patient['gender']}</p>
+                <p>Weight: {patient['weight']} | Height: {patient['height']}</p>
+            </div>
+        """, unsafe_allow_html=True)
     with col3:
-        st.metric("🩸 Oxygen", f"{patient['oxygen']}%",
-                  "Normal" if patient['oxygen'] >= 95 else "Low")
+        st.markdown(f"""
+            <div class="card">
+                <h4>🌡️ Temperature</h4>
+                <div class="metric-value">{patient['temperature']}°C</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-    # ✅ Charts for trends
-    df = get_patients()
-    patient_history = df[df["name"] == patient["name"]].sort_values("uploaded_at")
-
-    if not patient_history.empty and len(patient_history) > 1:
-        st.subheader("📈 Vitals Trend Over Time")
-        st.line_chart(patient_history[["heart_rate", "systolic", "diastolic", "oxygen"]].set_index(patient_history["uploaded_at"]))
+    col4, col5, col6 = st.columns(3)
+    with col4:
+        st.markdown(f"""
+            <div class="card">
+                <h4>BMI</h4>
+                <div class="metric-value">{round(patient['bmi'], 2)}</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with col5:
+        st.markdown(f"""
+            <div class="card">
+                <h4>🩸 Blood Pressure</h4>
+                <div class="metric-value">{patient['systolic']}/{patient['diastolic']}</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with col6:
+        st.markdown(f"""
+            <div class="card">
+                <h4>Oxygen Level</h4>
+                <div class="metric-value">{patient['oxygen']}%</div>
+            </div>
+        """, unsafe_allow_html=True)
 
 # ---------------------------
 # Main Router
