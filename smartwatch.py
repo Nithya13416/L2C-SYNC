@@ -1,54 +1,44 @@
 import streamlit as st
-from datetime import datetime
-import random
 
-# ------------------------
-# User credentials
-# ------------------------
-USERS = {
-    "doctor111": "password123",
-    "nithyashree": "Webapp@1"
+# -------------------
+# Dummy Users
+# -------------------
+USERS = {"doctor111": "password123"}
+
+# -------------------
+# Dummy Patients
+# -------------------
+PATIENTS = {
+    "saif": {
+        "name": "saif ben hmida",
+        "email": "ss@gmail.com",
+        "age": 54,
+        "gender": "Men",
+        "weight": 62,
+        "height": 168,
+        "heart_rate": 77,
+        "temperature": 36,
+        "bmi": 21.97,
+        "bp_sys": 139,
+        "bp_dia": 79,
+        "oxygen": 93,
+    }
 }
 
-# ------------------------
-# Default patient data
-# ------------------------
-PATIENTS = [
-    {"name": "Mr X", "age": 54, "gender": "Male", "weight": 62, "height": 168, "contact": "x_contact@gmail.com"},
-    {"name": "Mr Y", "age": 47, "gender": "Male", "weight": 70, "height": 172, "contact": "y_contact@gmail.com"},
-    {"name": "Mr Z", "age": 60, "gender": "Male", "weight": 80, "height": 175, "contact": "z_contact@gmail.com"},
-    {"name": "Saif Ben Hmida", "age": 54, "gender": "Male", "weight": 62, "height": 168, "contact": "ss@gmail.com"},
-]
-
-# ------------------------
-# Utility for random metrics
-# ------------------------
-def generate_metrics():
-    return {
-        "heart_rate": random.randint(60, 100),
-        "temperature": round(random.uniform(35.5, 37.5), 1),
-        "bmi": round(random.uniform(18, 28), 2),
-        "systolic_bp": random.randint(110, 150),
-        "diastolic_bp": random.randint(70, 95),
-        "spo2": random.randint(90, 100),
-    }
-
-# ------------------------
-# Session State Setup
-# ------------------------
+# -------------------
+# Session Init
+# -------------------
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "page" not in st.session_state:
     st.session_state.page = "login"
 if "selected_patient" not in st.session_state:
     st.session_state.selected_patient = None
-if "patients" not in st.session_state:
-    st.session_state.patients = PATIENTS.copy()
 
-# ------------------------
-# Login Page
-# ------------------------
-if st.session_state.page == "login":
+# -------------------
+# LOGIN PAGE
+# -------------------
+def login_page():
     col1, col2 = st.columns([2, 1])
     with col1:
         st.image(
@@ -64,87 +54,95 @@ if st.session_state.page == "login":
                 st.session_state.logged_in = True
                 st.session_state.page = "patients"
                 st.success("Login successful ✅")
-                st.rerun()
+                st.experimental_rerun()
             else:
                 st.error("Invalid username or password ❌")
-    st.stop()
 
-# ------------------------
-# Patients Page
-# ------------------------
-if st.session_state.page == "patients":
-    st.sidebar.title("Dashboard")
-    st.sidebar.button("🚪 Logout", on_click=lambda: st.session_state.update({"logged_in": False, "page": "login"}))
+# -------------------
+# PATIENT SELECTION PAGE
+# -------------------
+def patients_page():
+    st.title("👩‍⚕️ Patients List")
+    for pid, details in PATIENTS.items():
+        if st.button(f"📂 {details['name']}"):
+            st.session_state.selected_patient = pid
+            st.session_state.page = "dashboard"
+            st.experimental_rerun()
 
-    st.title("👨‍⚕️ My Patients")
+# -------------------
+# DASHBOARD PAGE
+# -------------------
+def dashboard_page():
+    patient = PATIENTS[st.session_state.selected_patient]
 
-    # --- Search bar ---
-    search = st.text_input("🔎 Search Users", "")
-    if st.button("Reset"):
-        search = ""
-
-    # --- Add patient form ---
-    with st.expander("➕ Add New Patient"):
-        with st.form("add_patient_form", clear_on_submit=True):
-            name = st.text_input("Full Name")
-            age = st.number_input("Age", min_value=0, max_value=120, step=1)
-            gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-            weight = st.number_input("Weight (kg)", min_value=1, max_value=300, step=1)
-            height = st.number_input("Height (cm)", min_value=30, max_value=250, step=1)
-            contact = st.text_input("Emergency Contact (email or phone)")
-            submitted = st.form_submit_button("✅ Add Patient")
-
-            if submitted:
-                new_patient = {
-                    "name": name,
-                    "age": age,
-                    "gender": gender,
-                    "weight": weight,
-                    "height": height,
-                    "contact": contact,
-                }
-                st.session_state.patients.append(new_patient)
-                st.success(f"Patient **{name}** added successfully!")
-                st.rerun()
-
-    st.markdown("---")
-
-    # --- Patient List ---
-    for p in st.session_state.patients:
-        if search.lower() in p["name"].lower():
-            col1, col2 = st.columns([3, 1])
-            col1.markdown(f"**{p['name']}** ({p['age']} yrs, {p['gender']})")
-            if col2.button("📊 View Metrics", key=p["name"]):
-                st.session_state.selected_patient = p
-                st.session_state.page = "details"
-                st.rerun()
-
-# ------------------------
-# Patient Details Page
-# ------------------------
-elif st.session_state.page == "details":
-    patient = st.session_state.selected_patient
-    metrics = generate_metrics()
-
-    st.sidebar.button("⬅ Back to Patients", on_click=lambda: st.session_state.update({"page": "patients"}))
-    st.sidebar.button("🚪 Logout", on_click=lambda: st.session_state.update({"logged_in": False, "page": "login"}))
-
-    st.title(f"👋 Welcome Back Doctor")
-    st.markdown(f"### {patient['name']}")
-    st.markdown(f"📧 Emergency Contact: {patient['contact']}")
-
-    col1, col2, col3 = st.columns(3)
+    # Top navigation
+    col1, col2, col3 = st.columns([1, 3, 1])
     with col1:
-        st.metric("❤️ Heart Rate", f"{metrics['heart_rate']} BPM", "Normal")
+        if st.button("⬅️ Return"):
+            st.session_state.page = "patients"
+            st.experimental_rerun()
     with col2:
-        st.metric("🌡 Temperature", f"{metrics['temperature']} °C", "Good")
+        st.subheader("Dashboard")
     with col3:
-        st.metric("⚖ BMI", f"{metrics['bmi']}", "Normal")
+        st.text_input("🔍 Search...")
 
+    st.markdown(f"## Welcome Back Doctor")
+
+    # Layout
+    col1, col2, col3 = st.columns(3)
+
+    # Heart Rate
+    with col1:
+        st.markdown("### Heart Rate")
+        st.metric(label="", value=f"{patient['heart_rate']} BPM")
+        st.success("Normal" if 60 <= patient['heart_rate'] <= 100 else "Abnormal")
+
+    # Patient Info (Center)
+    with col2:
+        st.markdown("### Patient Info")
+        st.markdown(f"**{patient['name']}**")
+        st.markdown(f"📧 {patient['email']}")
+        st.write(f"**Age:** {patient['age']} | **Gender:** {patient['gender']}")
+        st.write(f"**Weight:** {patient['weight']} | **Height:** {patient['height']}")
+
+    # Temperature
+    with col3:
+        st.markdown("### Temperature")
+        st.metric(label="", value=f"{patient['temperature']}°C")
+        st.success("Good" if 36 <= patient['temperature'] <= 37 else "Bad")
+
+    # Second row
     col4, col5, col6 = st.columns(3)
+
+    # BMI
     with col4:
-        st.metric("🩸 Blood Pressure", f"{metrics['systolic_bp']}/{metrics['diastolic_bp']} mmHg", "Normal")
+        st.markdown("### BMI")
+        st.metric(label="", value=f"{patient['bmi']:.2f}")
+        st.success("Normal" if 18.5 <= patient['bmi'] <= 24.9 else "Abnormal")
+
+    # Blood Pressure
     with col5:
-        st.metric("🫁 Oxygen", f"{metrics['spo2']}%", "Good" if metrics['spo2'] > 92 else "Low")
+        st.markdown("### Systolic & Diastolic Pressure")
+        st.write(f"**Sys:** {patient['bp_sys']}")
+        st.write(f"**Dia:** {patient['bp_dia']}")
+        if patient['bp_sys'] < 140 and patient['bp_dia'] < 90:
+            st.success("Normal")
+        else:
+            st.error("High")
+
+    # Oxygen
     with col6:
-        st.metric("📊 Age/Height/Weight", f"{patient['age']} yrs / {patient['height']} cm / {patient['weight']} kg")
+        st.markdown("### Oxygen Level")
+        st.metric(label="", value=f"{patient['oxygen']}%")
+        st.success("Good" if patient['oxygen'] >= 95 else "Low")
+
+# -------------------
+# MAIN APP
+# -------------------
+if not st.session_state.logged_in:
+    login_page()
+else:
+    if st.session_state.page == "patients":
+        patients_page()
+    elif st.session_state.page == "dashboard":
+        dashboard_page()
