@@ -107,9 +107,13 @@ if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
             st.session_state.chat_history["slack@channel"].append(sm)
 
 # ---------------- Auto-refresh ----------------
-st_autorefresh = st.sidebar.checkbox("🔄 Auto-refresh Slack", value=True)
-if st_autorefresh:
-    st.experimental_rerun()  # refresh the page to fetch new messages
+# ---------------- Auto-refresh ----------------
+from streamlit_autorefresh import st_autorefresh
+
+enable_refresh = st.sidebar.checkbox("🔄 Auto-refresh Slack", value=True)
+
+if enable_refresh:
+    st_autorefresh(interval=5000, key="slackrefresh")  # refresh every 5s
 
 # ---------------- Conversation view ----------------
 st.markdown("---")
