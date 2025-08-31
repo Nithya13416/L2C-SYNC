@@ -8,7 +8,9 @@ from dotenv import load_dotenv
 
 # ---------------- CONFIG ----------------
 load_dotenv()
-SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")   # xoxb-...
+SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")  
+SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID")
+
 DATA_FILE = "conversations.json"
 
 # Slack client
@@ -38,10 +40,10 @@ def get_slack_channels():
         return {}
 
 
-def fetch_slack_messages(channel_id):
-    """Pull latest Slack messages from a channel"""
+def fetch_slack_messages():
+    """Pull latest Slack messages and normalize them"""
     try:
-        response = slack_client.conversations_history(channel=channel_id, limit=20)
+        response = slack_client.conversations_history(channel=SLACK_CHANNEL, limit=20)
         messages = response.get("messages", [])
         formatted = []
         for msg in reversed(messages):  # oldest first
@@ -54,7 +56,11 @@ def fetch_slack_messages(channel_id):
             })
         return formatted
     except SlackApiError as e:
-        st.error(f"Slack fetch error: {e.response['error']}")
+        error = e.response['error']
+        st.error(f"Slack channel fetch error: {error}")
+        
+        # 🔍 Debug: Show full error payload to see missing scopes
+        st.code(json.dumps(e.response.data, indent=2))
         return []
 
 
