@@ -4,7 +4,8 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import json
 from datetime import datetime
-
+from dotenv import load_dotenv
+load_dotenv()
 # ---------------- CONFIG ----------------
 SLACK_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL_ID")  # e.g. C09D8JAP141
