@@ -1,0 +1,17 @@
+{
+  "mansabasavanna@gmail.com": [
+    {
+      "sender": {
+        "name": "nithya",
+        "email": "vijayanithyashree@gmail.com"
+      },
+      "recipient": {
+        "name": "manasa",
+        "email": "mansabasavanna@gmail.com"
+      },
+      "message": "Hi!",
+      "timestamp": "2025-08-31 20:19:06",
+      "status": "\u2705 Delivered"
+    }
+  ]
+}
