@@ -56,10 +56,8 @@ def fetch_slack_messages():
             })
         return formatted
     except SlackApiError as e:
-        error = e.response['error']
-        st.error(f"Slack channel fetch error: {error}")
-        
-        # 🔍 Debug: Show full error payload to see missing scopes
+        # show both the short error + full JSON response
+        st.error(f"Slack channel fetch error: {e.response['error']}")
         st.code(json.dumps(e.response.data, indent=2))
         return []
 
