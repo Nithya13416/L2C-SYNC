@@ -1,0 +1,191 @@
+import os
+import json
+import datetime
+import requests
+import streamlit as st
+from dotenv import load_dotenv
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+
+# ======================
+# CONFIG
+# ======================
+load_dotenv()
+
+CHAT_HISTORY_FILE = "chat_history.json"
+SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "").strip()
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#general")
+
+slack_client = WebClient(token=SLACK_BOT_TOKEN)
+
+
+# ======================
+# HISTORY HANDLERS
+# ======================
+def load_history():
+    if os.path.exists(CHAT_HISTORY_FILE):
+        with open(CHAT_HISTORY_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+
+def save_history(history):
+    with open(CHAT_HISTORY_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+# ======================
+# SLACK HELPERS
+# ======================
+def send_to_slack_webhook(sender_name, recipient_name, message_text):
+    """Send to Slack via webhook (pretty blocks)."""
+    if not SLACK_WEBHOOK_URL:
+        return False, "SLACK_WEBHOOK_URL not configured."
+
+    blocks = [
+        {"type": "header", "text": {"type": "plain_text", "text": "New message from Streamlit"}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*From:*\n{sender_name}"},
+            {"type": "mrkdwn", "text": f"*To:*\n{recipient_name}"},
+        ]},
+        {"type": "section", "text": {"type": "mrkdwn", "text": f"*Message:*\n{message_text}"}},
+        {"type": "context", "elements": [
+            {"type": "mrkdwn", "text": f"Sent at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"}
+        ]},
+    ]
+    payload = {"text": f"Message from {sender_name} to {recipient_name}", "blocks": blocks}
+
+    try:
+        r = requests.post(SLACK_WEBHOOK_URL, json=payload, timeout=10)
+        ok = (r.status_code == 200 and r.text.strip().lower() == "ok")
+        return ok, (r.text if not ok else "ok")
+    except Exception as e:
+        return False, str(e)
+
+
+def send_to_slack_bot(user, message):
+    """Send to Slack via bot token."""
+    if not SLACK_BOT_TOKEN:
+        return
+    try:
+        slack_client.chat_postMessage(channel=SLACK_CHANNEL, text=f"*{user}:* {message}")
+    except SlackApiError as e:
+        st.error(f"Slack error: {e.response['error']}")
+
+
+def fetch_from_slack(latest_ts=None):
+    """Fetch new messages from Slack via bot token."""
+    if not SLACK_BOT_TOKEN:
+        return []
+    try:
+        response = slack_client.conversations_history(
+            channel=SLACK_CHANNEL,
+            oldest=latest_ts or 0
+        )
+        messages = response["messages"]
+        return [
+            {"user": m.get("user", "SlackUser"), "text": m["text"], "ts": m["ts"]}
+            for m in messages if "subtype" not in m
+        ]
+    except SlackApiError as e:
+        st.error(f"Slack fetch error: {e.response['error']}")
+        return []
+
+
+# ======================
+# STREAMLIT UI
+# ======================
+st.set_page_config(page_title="Teams-like Messaging App (Slack)", layout="wide")
+st.title("💬 Teams-like Messaging App ↔ Slack")
+
+# Session state init
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = load_history()
+if "last_ts" not in st.session_state:
+    st.session_state.last_ts = None
+
+# Sidebar conversation list
+st.sidebar.title("Chats")
+recipient_list = list(st.session_state.chat_history.keys())
+selected_recipient = st.sidebar.radio("Select a conversation", recipient_list) if recipient_list else None
+if not recipient_list:
+    st.sidebar.markdown("_No conversations yet_")
+
+# Pull messages from Slack (if bot enabled)
+slack_msgs = fetch_from_slack(st.session_state.last_ts)
+if slack_msgs:
+    for msg in reversed(slack_msgs):
+        entry = {
+            "sender": {"name": msg["user"], "email": "slack"},
+            "recipient": {"name": "StreamlitUser", "email": "local"},
+            "message": msg["text"],
+            "timestamp": msg["ts"],
+            "status": "📥 From Slack"
+        }
+        st.session_state.chat_history.setdefault("slack", []).append(entry)
+    st.session_state.last_ts = slack_msgs[0]["ts"]
+    save_history(st.session_state.chat_history)
+
+# Compose UI
+st.header("Compose Message")
+sender_name     = st.text_input("Your Name", value="")
+sender_email    = st.text_input("Your Email", value="")
+recipient_name  = st.text_input("Recipient Name", value="")
+recipient_email = st.text_input("Recipient Email (used as conversation key)", value="")
+message_text    = st.text_area("Type your message here...", height=120)
+sent = st.button("Send")
+
+if sent:
+    if not (sender_name and sender_email and recipient_name and recipient_email and message_text):
+        st.error("Please fill in all fields.")
+    else:
+        payload = {
+            "sender": {"name": sender_name, "email": sender_email},
+            "recipient": {"name": recipient_name, "email": recipient_email},
+            "message": message_text,
+            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "✅ Delivered"
+        }
+        st.session_state.chat_history.setdefault(recipient_email, []).append(payload)
+        save_history(st.session_state.chat_history)
+
+        # Send to Slack
+        send_to_slack_webhook(sender_name, recipient_name, message_text)
+        send_to_slack_bot(sender_name, message_text)
+
+        st.success("Message sent!")
+        selected_recipient = recipient_email
+
+# Conversation view
+st.markdown("---")
+if selected_recipient and selected_recipient in st.session_state.chat_history:
+    st.subheader(f"Conversation with {selected_recipient}")
+    for chat in st.session_state.chat_history[selected_recipient]:
+        is_sender   = chat["sender"]["email"] == sender_email
+        bubble_bg   = "#0078D4" if is_sender else "#E5E5EA"
+        text_color  = "white" if is_sender else "black"
+        align       = "flex-end" if is_sender else "flex-start"
+        avatar_text = chat["sender"]["name"][:2].upper()
+
+        st.markdown(
+            f"""
+            <div style='display:flex; justify-content:{align}; margin: 10px 0;'>
+              <div style='display:flex; align-items:flex-end; gap:10px;'>
+                <div style='width:40px;height:40px;background:#555;border-radius:50%;
+                            color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;'>
+                  {avatar_text}
+                </div>
+                <div style='background:{bubble_bg};color:{text_color};padding:12px 14px;border-radius:12px;max-width:60%;'>
+                  <b>{chat['sender']['name']}</b><br/>
+                  {chat['message']}<br/>
+                  <span style='font-size:.8em;opacity:.75;'>{chat['timestamp']} {chat['status']}</span>
+                </div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+else:
+    st.subheader("Conversation")
+    st.write("_No messages yet_")
