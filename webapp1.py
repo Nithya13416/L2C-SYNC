@@ -27,19 +27,22 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 
 # -------------------- User cache --------------------
+# ---------------- Slack user cache ----------------
 user_cache = {}
 
 def get_slack_username(user_id):
-    """Resolve Slack user ID → real name"""
+    """Resolve Slack user ID into real name (cached)"""
     if user_id in user_cache:
         return user_cache[user_id]
+
     try:
         response = slack_client.users_info(user=user_id)
-        real_name = response["user"].get("real_name") or response["user"].get("name")
+        real_name = response["user"]["real_name"] or response["user"]["name"]
         user_cache[user_id] = real_name
         return real_name
     except SlackApiError:
-        return user_id  # fallback if API fails
+        return user_id  # fallback to ID if API fails
+
 
 # -------------------- Slack fetch --------------------
 def fetch_from_slack():
