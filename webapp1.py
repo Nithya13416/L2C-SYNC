@@ -31,18 +31,6 @@ selected_recipient = st.sidebar.radio("Select a conversation", recipient_list) i
 if not recipient_list:
     st.sidebar.markdown("_No conversations yet_")
 
-# ---------------- Helper: Get Slack username ----------------
-def get_slack_username(user_id):
-    """Convert Slack user_id -> real display name"""
-    try:
-        if not user_id:
-            return "Unknown"
-        response = slack_client.users_info(user=user_id)
-        user = response.get("user", {})
-        return user.get("profile", {}).get("real_name", user.get("name", user_id))
-    except SlackApiError:
-        return user_id
-
 # ---------------- Helper: Slack sender ----------------
 def send_to_slack_channel(sender_name, message_text):
     """Send message directly into Slack channel via bot token"""
@@ -59,6 +47,16 @@ def send_to_slack_channel(sender_name, message_text):
         return False, e.response["error"]
 
 # ---------------- Helper: Slack fetcher ----------------
+def get_slack_username(user_id):
+    """Get username from Slack user ID"""
+    try:
+        if not slack_client:
+            return "Unknown"
+        resp = slack_client.users_info(user=user_id)
+        return resp["user"]["profile"].get("real_name", "Unknown")
+    except Exception:
+        return "Unknown"
+
 def fetch_from_slack():
     """Fetch last 10 messages from Slack channel"""
     if not slack_client or not SLACK_CHANNEL_ID:
@@ -105,15 +103,19 @@ if sent:
             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "status": "✅ Delivered"
         }
+        # ✅ Add to local chat history immediately
         st.session_state.chat_history.setdefault(recipient_email, []).append(payload)
 
+        # Send to Slack
         ok, info = send_to_slack_channel(sender_name, message_text)
         if ok:
             st.success("Message sent to Slack channel!")
         else:
             st.error(f"Slack send failed: {info}")
 
+        # ✅ Show conversation instantly (force re-render)
         selected_recipient = recipient_email
+        st.experimental_rerun()
 
 # ---------------- Slack sync ----------------
 if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
