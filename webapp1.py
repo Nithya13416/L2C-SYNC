@@ -115,7 +115,7 @@ if sent:
 
         # ✅ Show conversation instantly (force re-render)
         selected_recipient = recipient_email
-        st.experimental_rerun()
+        st.rerun()
 
 # ---------------- Slack sync ----------------
 if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
