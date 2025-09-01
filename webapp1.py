@@ -86,8 +86,10 @@ st.set_page_config(page_title="Teams-like Messaging", layout="wide")
 st.title("💬 Conversation with Slack Channel")
 
 # Auto-refresh every 5s
-st_autorefresh = st.runtime.legacy_caching.clear_cache()  # dummy call for Streamlit <1.32
-st.experimental_rerun = False  # placeholder (so no crash if version mismatch)
+from streamlit_autorefresh import st_autorefresh
+
+# Auto-refresh every 5s
+st_autorefresh(interval=5000, limit=None, key="slack_refresher")
 
 # Fetch latest Slack messages
 slack_msgs = fetch_from_slack()
