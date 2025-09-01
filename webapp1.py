@@ -4,6 +4,7 @@ import streamlit as st
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from streamlit_autorefresh import st_autorefresh
 
 # --- Load secrets from .env ---
 load_dotenv()
