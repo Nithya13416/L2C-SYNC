@@ -1,7 +1,5 @@
 import os
-import uuid
 import datetime
-import requests
 import streamlit as st
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -9,32 +7,30 @@ from slack_sdk.errors import SlackApiError
 
 # --- Load secrets from .env ---
 load_dotenv()
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "").strip()
 SLACK_BOT_TOKEN   = os.getenv("SLACK_BOT_TOKEN", "").strip()
 SLACK_CHANNEL_ID  = os.getenv("SLACK_CHANNEL_ID", "").strip()
 
 # Slack client
 slack_client = WebClient(token=SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
 
-# --- Streamlit page config ---
 st.set_page_config(page_title="Teams-like Messaging App", layout="wide")
 st.title("💬 Teams-like Messaging App ")
 
-# --- Auto refresh every 5 seconds ---
-st_autorefresh = st.experimental_autorefresh(interval=5000, limit=None, key="slack_refresher")
+# Auto-refresh every 5 seconds
+st_autorefresh = st.autorefresh(interval=5000, limit=None, key="slack_refresher")
 
-# --- Session state ---
+# ---------------- Session state ----------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = {}
 
-# --- Sidebar ---
+# ---------------- Sidebar ----------------
 st.sidebar.title("Chats")
 recipient_list = list(st.session_state.chat_history.keys())
 selected_recipient = st.sidebar.radio("Select a conversation", recipient_list) if recipient_list else None
 if not recipient_list:
     st.sidebar.markdown("_No conversations yet_")
 
-# --- Helper: Slack sender ---
+# ---------------- Helper: Slack sender ----------------
 def send_to_slack_channel(sender_name, message_text):
     """Send message directly into Slack channel via bot token"""
     if not slack_client or not SLACK_CHANNEL_ID:
@@ -49,7 +45,7 @@ def send_to_slack_channel(sender_name, message_text):
     except SlackApiError as e:
         return False, e.response["error"]
 
-# --- Helper: Slack fetcher ---
+# ---------------- Helper: Slack fetcher ----------------
 def fetch_from_slack():
     """Fetch last 10 messages from Slack channel"""
     if not slack_client or not SLACK_CHANNEL_ID:
@@ -59,10 +55,9 @@ def fetch_from_slack():
         response = slack_client.conversations_history(channel=SLACK_CHANNEL_ID, limit=10)
         messages = []
         for msg in reversed(response.get("messages", [])):  # oldest first
-            user_name = msg.get("user", "Slack User")
             messages.append({
-                "id": msg.get("ts"),  # Slack unique ID
-                "sender": {"name": user_name, "email": "slack@channel"},
+                "id": msg["ts"],  # unique id to avoid duplicates
+                "sender": {"name": msg.get("user", "Slack User"), "email": "slack@channel"},
                 "recipient": {"name": "You", "email": "local@app"},
                 "message": msg.get("text", ""),
                 "timestamp": datetime.datetime.fromtimestamp(float(msg["ts"])).strftime("%Y-%m-%d %H:%M:%S"),
@@ -73,7 +68,7 @@ def fetch_from_slack():
         st.error(f"Slack fetch error: {e.response['error']}")
         return []
 
-# --- Compose UI ---
+# ---------------- Compose UI ----------------
 st.header("Compose Message")
 
 sender_name     = st.text_input("Your Name", value="")
@@ -83,13 +78,14 @@ message_text    = st.text_area("Type your message here...", height=120)
 
 sent = st.button("Send")
 
-# --- Send handler ---
+# ---------------- Send handler ----------------
 if sent:
     if not (sender_name and sender_email and message_text):
         st.error("Please fill in all fields.")
     else:
+        msg_id = f"local-{datetime.datetime.now().timestamp()}"
         payload = {
-            "id": str(uuid.uuid4()),  # unique local ID
+            "id": msg_id,
             "sender": {"name": sender_name, "email": sender_email},
             "recipient": {"name": "Slack Channel", "email": recipient_email},
             "message": message_text,
@@ -106,23 +102,22 @@ if sent:
 
         selected_recipient = recipient_email
 
-# --- Slack sync ---
+# ---------------- Slack sync ----------------
 if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
     slack_msgs = fetch_from_slack()
     for sm in slack_msgs:
         st.session_state.chat_history.setdefault("slack@channel", [])
-        if not any(m.get("id") == sm.get("id") for m in st.session_state.chat_history["slack@channel"]):
+        # Prevent duplicates
+        if all(sm["id"] != existing["id"] for existing in st.session_state.chat_history["slack@channel"]):
             st.session_state.chat_history["slack@channel"].append(sm)
 
-# --- Conversation view ---
+# ---------------- Conversation view ----------------
 st.markdown("---")
 if selected_recipient and selected_recipient in st.session_state.chat_history:
     st.subheader(f"Conversation with Slack Channel")
 
-    # only show last 2 messages
-    recent_chats = st.session_state.chat_history[selected_recipient][-2:]
-
-    for chat in recent_chats:
+    # Show only last 2 messages
+    for chat in st.session_state.chat_history[selected_recipient][-2:]:
         is_sender   = chat["sender"]["email"] == sender_email
         bubble_bg   = "#0078D4" if is_sender else "#E5E5EA"
         text_color  = "white" if is_sender else "black"
