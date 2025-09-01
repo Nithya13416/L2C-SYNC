@@ -44,6 +44,20 @@ def send_to_slack_channel(sender_name, message_text):
     except SlackApiError as e:
         return False, e.response["error"]
 
+# ---------------- Helper: Resolve Slack ID ----------------
+def get_slack_username(user_id):
+    """Resolve Slack user ID into display name"""
+    if not slack_client:
+        return user_id
+    try:
+        response = slack_client.users_info(user=user_id)
+        if response.get("ok"):
+            profile = response["user"]["profile"]
+            return profile.get("display_name") or profile.get("real_name") or user_id
+    except SlackApiError:
+        pass
+    return user_id  # fallback
+
 # ---------------- Helper: Slack fetcher ----------------
 def fetch_from_slack():
     """Fetch last 10 messages from Slack channel"""
@@ -54,8 +68,11 @@ def fetch_from_slack():
         response = slack_client.conversations_history(channel=SLACK_CHANNEL_ID, limit=10)
         messages = []
         for msg in reversed(response.get("messages", [])):  # oldest first
+            user_id = msg.get("user", "Slack User")
+            user_name = get_slack_username(user_id)
+
             messages.append({
-                "sender": {"name": msg.get("user", "Slack User"), "email": "slack@channel"},
+                "sender": {"name": user_name, "email": "slack@channel"},
                 "recipient": {"name": "You", "email": "local@app"},
                 "message": msg.get("text", ""),
                 "timestamp": datetime.datetime.fromtimestamp(float(msg["ts"])).strftime("%Y-%m-%d %H:%M:%S"),
@@ -106,15 +123,13 @@ if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
         if sm not in st.session_state.chat_history["slack@channel"]:
             st.session_state.chat_history["slack@channel"].append(sm)
 
-
-
 # ---------------- Conversation view ----------------
 st.markdown("---")
 if selected_recipient and selected_recipient in st.session_state.chat_history:
     st.subheader(f"Conversation with Slack Channel")
     for chat in st.session_state.chat_history[selected_recipient]:
         is_sender   = chat["sender"]["email"] == sender_email
-        bubble_bg   = "#0078D4" if is_sender else "#E5E5EA"
+        bubble_bg   = "#0078D4" if is_sender else "#E5E5EA"   # blue for you, grey for others
         text_color  = "white" if is_sender else "black"
         align       = "flex-end" if is_sender else "flex-start"
         avatar_text = chat["sender"]["name"][:2].upper()
