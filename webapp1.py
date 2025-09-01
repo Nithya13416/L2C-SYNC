@@ -15,8 +15,8 @@ SLACK_CHANNEL_ID  = os.getenv("SLACK_CHANNEL_ID", "").strip()
 # Slack client
 slack_client = WebClient(token=SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
 
-st.set_page_config(page_title="Teams-like Messaging App (Slack)", layout="wide")
-st.title("💬 Teams-like Messaging App ↔ Slack (Send + Receive)")
+st.set_page_config(page_title="Teams-like Messaging App", layout="wide")
+st.title("💬 Teams-like Messaging App ")
 
 # ---------------- Session state ----------------
 if "chat_history" not in st.session_state:
@@ -106,14 +106,7 @@ if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
         if sm not in st.session_state.chat_history["slack@channel"]:
             st.session_state.chat_history["slack@channel"].append(sm)
 
-# ---------------- Auto-refresh ----------------
-# ---------------- Auto-refresh ----------------
-from streamlit_autorefresh import st_autorefresh
 
-enable_refresh = st.sidebar.checkbox("🔄 Auto-refresh Slack", value=True)
-
-if enable_refresh:
-    st_autorefresh(interval=5000, key="slackrefresh")  # refresh every 5s
 
 # ---------------- Conversation view ----------------
 st.markdown("---")
