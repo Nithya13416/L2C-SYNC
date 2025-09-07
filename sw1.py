@@ -22,6 +22,8 @@ if "page" not in st.session_state:
     st.session_state.page = "login"
 if "selected_patient" not in st.session_state:
     st.session_state.selected_patient = None
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False
 
 # ---------------------------
 # Load CSS for styling
@@ -86,8 +88,7 @@ def save_uploaded_data(df):
     })
 
     conn = sqlite3.connect("patients.db")
-    # ✅ append instead of replace
-    df.to_sql("patients_data", conn, if_exists="append", index=False)
+    df.to_sql("patients_data", conn, if_exists="replace", index=False)
     conn.close()
 
 def get_patients():
@@ -196,35 +197,47 @@ def patients_page():
             st.session_state.page = "login"
             st.rerun()
 
-    # ---------------- Manual Patient Entry ----------------
-    st.subheader("✍️ Add New Patient Manually")
+    # ---------------- Add New Patient (Button + Form) ----------------
+    if not st.session_state.show_form:
+        if st.button("➕ Add New Patient"):
+            st.session_state.show_form = True
+            st.rerun()
+    else:
+        st.subheader("✍️ Enter New Patient Details")
+        with st.form("manual_entry_form"):
+            name = st.text_input("Name")
+            age = st.number_input("Age", min_value=0, max_value=120, step=1)
+            gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+            weight = st.number_input("Weight (kg)", min_value=1.0, step=0.1)
+            height = st.number_input("Height (cm)", min_value=30.0, step=0.1)
+            email = st.text_input("Emergency Email")
+            heart_rate = st.number_input("Heart Rate (BPM)", min_value=20, max_value=200, step=1)
+            temperature = st.number_input("Temperature (°C)", min_value=30.0, max_value=45.0, step=0.1)
+            oxygen = st.number_input("Oxygen Level (%)", min_value=50, max_value=100, step=1)
+            systolic = st.number_input("Systolic BP", min_value=50, max_value=250, step=1)
+            diastolic = st.number_input("Diastolic BP", min_value=30, max_value=150, step=1)
 
-    with st.form("manual_entry_form"):
-        name = st.text_input("Name")
-        age = st.number_input("Age", min_value=0, max_value=120, step=1)
-        gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-        weight = st.number_input("Weight (kg)", min_value=1.0, step=0.1)
-        height = st.number_input("Height (cm)", min_value=30.0, step=0.1)
-        email = st.text_input("Emergency Email")
-        heart_rate = st.number_input("Heart Rate (BPM)", min_value=20, max_value=200, step=1)
-        temperature = st.number_input("Temperature (°C)", min_value=30.0, max_value=45.0, step=0.1)
-        oxygen = st.number_input("Oxygen Level (%)", min_value=50, max_value=100, step=1)
-        systolic = st.number_input("Systolic BP", min_value=50, max_value=250, step=1)
-        diastolic = st.number_input("Diastolic BP", min_value=30, max_value=150, step=1)
+            submitted = st.form_submit_button("✅ Save Patient")
+            cancel = st.form_submit_button("❌ Cancel")
 
-        submitted = st.form_submit_button("➕ Add Patient")
-        if submitted:
-            bmi = round(weight / ((height / 100) ** 2), 2)
-            conn = sqlite3.connect("patients.db")
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO patients_data 
-                (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi))
-            conn.commit()
-            conn.close()
-            st.success(f"✅ Patient {name} added successfully!")
+            if submitted:
+                bmi = round(weight / ((height / 100) ** 2), 2)
+                conn = sqlite3.connect("patients.db")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO patients_data 
+                    (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi))
+                conn.commit()
+                conn.close()
+                st.success(f"✅ Patient {name} added successfully!")
+                st.session_state.show_form = False
+                st.rerun()
+
+            if cancel:
+                st.session_state.show_form = False
+                st.rerun()
 
     # ---------------- Upload Excel file ----------------
     st.subheader("📂 Upload Patient Data (Excel)")
