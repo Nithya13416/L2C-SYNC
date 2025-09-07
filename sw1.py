@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+import io
 
 # ---------------------------
 # Dummy Users
@@ -83,7 +86,8 @@ def save_uploaded_data(df):
     })
 
     conn = sqlite3.connect("patients.db")
-    df.to_sql("patients_data", conn, if_exists="replace", index=False)
+    # ✅ append instead of replace
+    df.to_sql("patients_data", conn, if_exists="append", index=False)
     conn.close()
 
 def get_patients():
@@ -91,6 +95,65 @@ def get_patients():
     df = pd.read_sql("SELECT * FROM patients_data", conn)
     conn.close()
     return df
+
+# ---------------------------
+# Health Risk Analysis
+# ---------------------------
+def get_risk_explanations(patient):
+    risks = []
+
+    if not (60 <= patient['heart_rate'] <= 100):
+        risks.append("⚠️ Abnormal Heart Rate: May indicate arrhythmia, dehydration, or stress.")
+
+    if not (36 <= patient['temperature'] <= 37.5):
+        risks.append("🌡️ Abnormal Temperature: Could indicate fever or hypothermia.")
+
+    if not (18.5 <= patient['bmi'] <= 24.9):
+        risks.append("⚖️ Unhealthy BMI: Risk of obesity, diabetes, or malnutrition.")
+
+    if not (patient['systolic'] < 140 and patient['diastolic'] < 90):
+        risks.append("🩸 High Blood Pressure: Risk of hypertension and cardiovascular disease.")
+
+    if patient['oxygen'] < 95:
+        risks.append("🫁 Low Oxygen Level: Possible respiratory issues or hypoxemia.")
+
+    if not risks:
+        risks.append("✅ All vitals are within healthy ranges.")
+
+    return risks
+
+# ---------------------------
+# PDF Report Generator
+# ---------------------------
+def generate_pdf_report(patient, risks):
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(50, 750, "Patient Health Report")
+
+    c.setFont("Helvetica", 12)
+    c.drawString(50, 720, f"Name: {patient['name']}")
+    c.drawString(50, 700, f"Age: {patient['age']}   Gender: {patient['gender']}")
+    c.drawString(50, 680, f"Email (Emergency): {patient['email']}")
+
+    c.drawString(50, 650, f"Heart Rate: {patient['heart_rate']} BPM")
+    c.drawString(50, 630, f"Temperature: {patient['temperature']} °C")
+    c.drawString(50, 610, f"Oxygen: {patient['oxygen']}%")
+    c.drawString(50, 590, f"Blood Pressure: {patient['systolic']}/{patient['diastolic']} mmHg")
+    c.drawString(50, 570, f"BMI: {round(patient['bmi'], 2)}")
+
+    c.setFont("Helvetica-Bold", 14)
+    c.drawString(50, 540, "Risk Analysis:")
+
+    c.setFont("Helvetica", 12)
+    y = 520
+    for risk in risks:
+        c.drawString(60, y, f"- {risk}")
+        y -= 20
+
+    c.save()
+    buffer.seek(0)
+    return buffer
 
 # ---------------------------
 # Login Page
@@ -133,7 +196,37 @@ def patients_page():
             st.session_state.page = "login"
             st.rerun()
 
-    # Upload Excel file
+    # ---------------- Manual Patient Entry ----------------
+    st.subheader("✍️ Add New Patient Manually")
+
+    with st.form("manual_entry_form"):
+        name = st.text_input("Name")
+        age = st.number_input("Age", min_value=0, max_value=120, step=1)
+        gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+        weight = st.number_input("Weight (kg)", min_value=1.0, step=0.1)
+        height = st.number_input("Height (cm)", min_value=30.0, step=0.1)
+        email = st.text_input("Emergency Email")
+        heart_rate = st.number_input("Heart Rate (BPM)", min_value=20, max_value=200, step=1)
+        temperature = st.number_input("Temperature (°C)", min_value=30.0, max_value=45.0, step=0.1)
+        oxygen = st.number_input("Oxygen Level (%)", min_value=50, max_value=100, step=1)
+        systolic = st.number_input("Systolic BP", min_value=50, max_value=250, step=1)
+        diastolic = st.number_input("Diastolic BP", min_value=30, max_value=150, step=1)
+
+        submitted = st.form_submit_button("➕ Add Patient")
+        if submitted:
+            bmi = round(weight / ((height / 100) ** 2), 2)
+            conn = sqlite3.connect("patients.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO patients_data 
+                (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi))
+            conn.commit()
+            conn.close()
+            st.success(f"✅ Patient {name} added successfully!")
+
+    # ---------------- Upload Excel file ----------------
     st.subheader("📂 Upload Patient Data (Excel)")
     uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
 
@@ -143,7 +236,7 @@ def patients_page():
         st.success("✅ Data uploaded & saved successfully!")
         st.dataframe(df)
 
-    # Show patient list if DB has data
+    # ---------------- Patient List ----------------
     try:
         df = get_patients()
         st.markdown("### Patient List:")
@@ -157,7 +250,7 @@ def patients_page():
                     st.session_state.page = "dashboard"
                     st.rerun()
     except Exception:
-        st.info("ℹ️ No patient data found. Please upload an Excel file.")
+        st.info("ℹ️ No patient data found. Please upload or add manually.")
 
 # ---------------------------
 # Dashboard Page
@@ -245,6 +338,21 @@ def dashboard_page():
                 </div>
             </div>
         """, unsafe_allow_html=True)
+
+    # Detailed Risk Explanations
+    st.subheader("📝 Detailed Risk Analysis")
+    risks = get_risk_explanations(patient)
+    for r in risks:
+        st.write(r)
+
+    # PDF Download
+    pdf_buffer = generate_pdf_report(patient, risks)
+    st.download_button(
+        label="📥 Download Patient Report (PDF)",
+        data=pdf_buffer,
+        file_name=f"{patient['name']}_report.pdf",
+        mime="application/pdf"
+    )
 
 # ---------------------------
 # Main Router
