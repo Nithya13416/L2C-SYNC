@@ -8,11 +8,11 @@ from streamlit_autorefresh import st_autorefresh   # ✅ auto-refresh
 
 # --- Load secrets from .env ---
 load_dotenv()
-SLACK_BOT_TOKEN   = os.getenv("SLACK_BOT_TOKEN", "").strip()
-SLACK_CHANNEL_ID  = os.getenv("SLACK_CHANNEL_ID", "").strip()
+SLACK_BOT_TOKEN2   = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_CHANNEL_ID2  = os.getenv("SLACK_CHANNEL_ID", "").strip()
 
 # Slack client
-slack_client = WebClient(token=SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
+slack_client = WebClient(token=SLACK_BOT_TOKEN2) if SLACK_BOT_TOKEN2 else None
 
 st.set_page_config(page_title="Teams-like Messaging App", layout="wide")
 st.title("💬 Teams-like Messaging App")
@@ -34,12 +34,12 @@ if not recipient_list:
 # ---------------- Helper: Slack sender ----------------
 def send_to_slack_channel(sender_name, message_text):
     """Send message directly into Slack channel via bot token"""
-    if not slack_client or not SLACK_CHANNEL_ID:
+    if not slack_client or not SLACK_CHANNEL_ID2:
         return False, "Slack client not configured."
 
     try:
         slack_client.chat_postMessage(
-            channel=SLACK_CHANNEL_ID,
+            channel=SLACK_CHANNEL_ID2,
             text=f"*{sender_name}*: {message_text}"
         )
         return True, "ok"
@@ -59,11 +59,11 @@ def get_slack_username(user_id):
 
 def fetch_from_slack():
     """Fetch last 10 messages from Slack channel"""
-    if not slack_client or not SLACK_CHANNEL_ID:
+    if not slack_client or not SLACK_CHANNEL_ID2:
         return []
 
     try:
-        response = slack_client.conversations_history(channel=SLACK_CHANNEL_ID, limit=10)
+        response = slack_client.conversations_history(channel=SLACK_CHANNEL_ID2, limit=10)
         messages = []
         for msg in reversed(response.get("messages", [])):  # oldest first
             user_id = msg.get("user", None)
@@ -118,7 +118,7 @@ if sent:
         st.rerun()
 
 # ---------------- Slack sync ----------------
-if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
+if SLACK_BOT_TOKEN2 and SLACK_CHANNEL_ID2:
     slack_msgs = fetch_from_slack()
     for sm in slack_msgs:
         st.session_state.chat_history.setdefault("slack@channel", [])
