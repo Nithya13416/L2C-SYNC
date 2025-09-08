@@ -4,8 +4,9 @@ import sqlite3
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 import io
-import requests   # ✅ for Slack Webhook
 import os
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 
 # ---------------------------
 # Dummy Users
@@ -16,22 +17,24 @@ USERS = {
 }
 
 # ---------------------------
-# Slack Webhook URL
+# Slack Setup
 # ---------------------------
-SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")  # Load from environment
+SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2", "")
+SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2", "")
+slack_client = WebClient(token=SLACK_BOT_TOKEN2) if SLACK_BOT_TOKEN2 else None
 
 def send_slack_message(message: str):
-    """Send a message to Slack if webhook URL is configured"""
-    if SLACK_WEBHOOK_URL:
+    """Send a message to a Slack channel if configured"""
+    if slack_client and SLACK_CHANNEL_ID2:
         try:
-            response = requests.post(
-                SLACK_WEBHOOK_URL, json={"text": message},
-                headers={"Content-Type": "application/json"}
+            slack_client.chat_postMessage(
+                channel=SLACK_CHANNEL_ID2,
+                text=message
             )
-            if response.status_code != 200:
-                st.error(f"Slack error: {response.text}")
-        except Exception as e:
-            st.error(f"Slack send failed: {e}")
+        except SlackApiError as e:
+            st.error(f"Slack error: {e.response['error']}")
+    else:
+        st.warning("⚠️ Slack not configured (missing token or channel ID).")
 
 # ---------------------------
 # Session State Initialization
@@ -46,7 +49,7 @@ if "show_form" not in st.session_state:
     st.session_state.show_form = False
 
 # ---------------------------
-# Load CSS
+# CSS Styling
 # ---------------------------
 def load_css():
     st.markdown(
