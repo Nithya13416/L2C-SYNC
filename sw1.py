@@ -12,26 +12,27 @@ import os
 # Slack Config
 # ---------------------------
 load_dotenv()
-SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")   # put in .env
-SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID") # put in .env
+SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2")   # put in .env
+SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2") # put in .env
 
 def send_slack_alert(patient, risks):
     """Send alert to Slack if risks are found."""
-    if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
+    if not SLACK_BOT_TOKEN2 or not SLACK_CHANNEL_ID2:
         st.warning("⚠️ Slack not configured (missing token or channel ID).")
         return
 
     # Send only if there are *real* risks (ignore ✅ message)
     real_risks = [r for r in risks if not r.startswith("✅")]
     if not real_risks:
+        st.info("✅ No critical risks to send.")
         return
 
     message = f"*🚨 Patient Alert: {patient['name']}* \n"
     message += "\n".join([f"- {r}" for r in real_risks])
 
     url = "https://slack.com/api/chat.postMessage"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}
-    data = {"channel": SLACK_CHANNEL_ID, "text": message}
+    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN2}"}
+    data = {"channel": SLACK_CHANNEL_ID2, "text": message}
 
     response = requests.post(url, headers=headers, data=data)
 
@@ -57,6 +58,8 @@ if "page" not in st.session_state:
     st.session_state.page = "login"
 if "selected_patient" not in st.session_state:
     st.session_state.selected_patient = None
+if "show_form" not in st.session_state:
+    st.session_state.show_form = False   # ✅ for manual patient form
 
 # ---------------------------
 # Load CSS for styling
@@ -119,7 +122,23 @@ def save_uploaded_data(df):
     })
 
     conn = sqlite3.connect("patients.db")
-    df.to_sql("patients_data", conn, if_exists="replace", index=False)
+    df.to_sql("patients_data", conn, if_exists="append", index=False)
+    conn.close()
+
+def save_manual_patient(patient):
+    """Insert a manually entered patient record into DB."""
+    conn = sqlite3.connect("patients.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO patients_data 
+        (name, age, gender, weight, height, email, heart_rate, temperature, oxygen, systolic, diastolic, bmi)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        patient["name"], patient["age"], patient["gender"], patient["weight"], patient["height"],
+        patient["email"], patient["heart_rate"], patient["temperature"], patient["oxygen"],
+        patient["systolic"], patient["diastolic"], patient["bmi"]
+    ))
+    conn.commit()
     conn.close()
 
 def get_patients():
@@ -133,25 +152,18 @@ def get_patients():
 # ---------------------------
 def get_risk_explanations(patient):
     risks = []
-
     if not (60 <= patient['heart_rate'] <= 100):
         risks.append("⚠️ Abnormal Heart Rate: May indicate arrhythmia, dehydration, or stress.")
-
     if not (36 <= patient['temperature'] <= 37.5):
         risks.append("🌡️ Abnormal Temperature: Could indicate fever or hypothermia.")
-
     if not (18.5 <= patient['bmi'] <= 24.9):
         risks.append("⚖️ Unhealthy BMI: Risk of obesity, diabetes, or malnutrition.")
-
     if not (patient['systolic'] < 140 and patient['diastolic'] < 90):
         risks.append("🩸 High Blood Pressure: Risk of hypertension and cardiovascular disease.")
-
     if patient['oxygen'] < 95:
         risks.append("🫁 Low Oxygen Level: Possible respiratory issues or hypoxemia.")
-
     if not risks:
         risks.append("✅ All vitals are within healthy ranges.")
-
     return risks
 
 # ---------------------------
@@ -237,6 +249,38 @@ def patients_page():
         st.success("✅ Data uploaded & saved successfully!")
         st.dataframe(df)
 
+    # ✅ Manual Entry Form Toggle
+    if st.button("➕ Add New Patient"):
+        st.session_state.show_form = True
+
+    if st.session_state.show_form:
+        st.subheader("📝 Enter Patient Details Manually")
+        with st.form("manual_form"):
+            name = st.text_input("Name")
+            age = st.number_input("Age", min_value=0, max_value=120)
+            gender = st.selectbox("Gender", ["Male", "Female", "Other"])
+            weight = st.number_input("Weight (kg)", min_value=0.0)
+            height = st.number_input("Height (cm)", min_value=0.0)
+            email = st.text_input("Emergency Email")
+            heart_rate = st.number_input("Heart Rate (BPM)", min_value=0)
+            temperature = st.number_input("Temperature (°C)", min_value=25.0, max_value=45.0)
+            oxygen = st.number_input("Oxygen (%)", min_value=0, max_value=100)
+            systolic = st.number_input("Systolic (mmHg)", min_value=0)
+            diastolic = st.number_input("Diastolic (mmHg)", min_value=0)
+
+            submitted = st.form_submit_button("✅ Save Patient")
+            if submitted:
+                bmi = round(weight / ((height/100)**2), 2) if height > 0 else 0
+                patient = {
+                    "name": name, "age": age, "gender": gender, "weight": weight, "height": height,
+                    "email": email, "heart_rate": heart_rate, "temperature": temperature,
+                    "oxygen": oxygen, "systolic": systolic, "diastolic": diastolic, "bmi": bmi
+                }
+                save_manual_patient(patient)
+                st.success(f"✅ Patient {name} added successfully")
+                st.session_state.show_form = False
+                st.rerun()
+
     try:
         df = get_patients()
         st.markdown("### Patient List:")
@@ -250,7 +294,7 @@ def patients_page():
                     st.session_state.page = "dashboard"
                     st.rerun()
     except Exception:
-        st.info("ℹ️ No patient data found. Please upload an Excel file.")
+        st.info("ℹ️ No patient data found. Please upload an Excel file or add manually.")
 
 # ---------------------------
 # Dashboard Page
@@ -273,6 +317,7 @@ def dashboard_page():
 
     st.subheader(f"Patient: {patient['name']}")
 
+    # --- Metrics Cards (same as before) ---
     col1, col2, col3 = st.columns(3)
     with col1:
         st.markdown(f"""
@@ -337,14 +382,17 @@ def dashboard_page():
             </div>
         """, unsafe_allow_html=True)
 
+    # --- Risk Analysis ---
     st.subheader("📝 Detailed Risk Analysis")
     risks = get_risk_explanations(patient)
     for r in risks:
         st.write(r)
 
-    # ✅ Send Slack alert if risks exist
-    send_slack_alert(patient, risks)
+    # ✅ Slack Button (not auto-send)
+    if st.button("🚨 Send Alert to Slack"):
+        send_slack_alert(patient, risks)
 
+    # --- PDF Report Download ---
     pdf_buffer = generate_pdf_report(patient, risks)
     st.download_button(
         label="📥 Download Patient Report (PDF)",
