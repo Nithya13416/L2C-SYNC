@@ -7,6 +7,7 @@ import io
 import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from dotenv import load_dotenv
 
 # ---------------------------
 # Dummy Users
@@ -19,6 +20,7 @@ USERS = {
 # ---------------------------
 # Slack Setup
 # ---------------------------
+load_dotenv()
 SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2", "")
 SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2", "")
 slack_client = WebClient(token=SLACK_BOT_TOKEN2) if SLACK_BOT_TOKEN2 else None
