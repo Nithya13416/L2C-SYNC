@@ -3,11 +3,14 @@ import pandas as pd
 import sqlite3
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
 import io
 from dotenv import load_dotenv
 import requests
 import os
 import json
+import joblib
 
 # ---------------------------
 # Slack Config
@@ -15,13 +18,30 @@ import json
 load_dotenv()
 SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2")
 SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2")
+slack_client = WebClient(token=os.getenv("SLACK_BOT_TOKEN2"))
 
 
-def send_slack_report(patient, risks, doctor_notes=""):   # ✅ added doctor_notes param
-    """Send detailed patient vitals to Slack in text format."""
-    if not SLACK_BOT_TOKEN2 or not SLACK_CHANNEL_ID2:
-        st.warning("⚠️ Slack not configured (missing token or channel ID).")
-        return
+# ---------------------------
+# Load Predictive Model
+# ---------------------------
+try:
+    risk_model = joblib.load("risk_model.pkl")
+except:
+    risk_model = None
+    st.warning("⚠️ Predictive risk model not found. Using threshold-based rules.")
+
+# ---------------------------
+# Slack Reporting
+# ---------------------------
+def send_slack_report(patient, risks, doctor_notes):
+    try:
+        response = slack_client.chat_postMessage(
+            channel=os.getenv("SLACK_CHANNEL_ID"),
+            text=f"*Patient Report*\n👤 Patient: {patient}\n⚠️ Risks: {risks}\n📝 Doctor Notes: {doctor_notes}"
+        )
+        print("✅ Report sent to Slack:", response["ts"])
+    except SlackApiError as e:
+        print(f"❌ Slack API Error: {e.response['error']}")
 
     message = f"*📋 Patient Vitals Report: {patient['name']}*\n"
     message += f"• Age: {patient['age']} | Gender: {patient['gender']}\n"
@@ -36,7 +56,6 @@ def send_slack_report(patient, risks, doctor_notes=""):   # ✅ added doctor_not
     for r in risks:
         message += f"- {r}\n"
 
-    # ✅ Include doctor’s notes if entered
     if doctor_notes.strip():
         message += f"\n*💬 Doctor's Notes:*\n{doctor_notes}\n"
 
@@ -52,7 +71,6 @@ def send_slack_report(patient, risks, doctor_notes=""):   # ✅ added doctor_not
         st.error(f"⚠️ Slack API Error: {response.text}")
     else:
         st.success("✅ Patient report sent to Slack")
-
 
 # ---------------------------
 # Dummy Users
@@ -78,43 +96,17 @@ if "show_form" not in st.session_state:
 # CSS
 # ---------------------------
 def load_css():
-    st.markdown(
-        """
+    st.markdown("""
         <style>
-        .block-container {
-            max-width: 1100px;
-            padding-top: 2rem;
-        }
-        h1, h2, h3 {
-            font-family: 'Segoe UI', sans-serif;
-        }
-        .card {
-            background-color: white;
-            border-radius: 16px;
-            padding: 20px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            margin-bottom: 20px;
-            text-align: center;
-        }
-        .metric-value {
-            font-size: 26px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-        .status {
-            font-size: 14px;
-            margin-top: 6px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            display: inline-block;
-        }
+        .block-container { max-width: 1100px; padding-top: 2rem; }
+        h1, h2, h3 { font-family: 'Segoe UI', sans-serif; }
+        .card { background-color: white; border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; text-align: center; }
+        .metric-value { font-size: 26px; font-weight: bold; margin-top: 10px; }
+        .status { font-size: 14px; margin-top: 6px; padding: 4px 10px; border-radius: 12px; display: inline-block; }
         .normal { background: #d4f8d4; color: #2e7d32; }
         .good { background: #d0f0ff; color: #0277bd; }
         .low { background: #ffe0e0; color: #c62828; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+        </style>""", unsafe_allow_html=True)
 
 # ---------------------------
 # DB Helpers
@@ -141,7 +133,6 @@ def init_db():
     conn.commit()
     conn.close()
 
-
 def save_uploaded_data(df):
     df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
     df = df.rename(columns={
@@ -153,7 +144,6 @@ def save_uploaded_data(df):
     conn = sqlite3.connect("patients.db")
     df.to_sql("patients_data", conn, if_exists="append", index=False)
     conn.close()
-
 
 def save_manual_patient(patient):
     conn = sqlite3.connect("patients.db")
@@ -168,20 +158,32 @@ def save_manual_patient(patient):
     conn.commit()
     conn.close()
 
-
 def get_patients():
     try:
         conn = sqlite3.connect("patients.db")
         df = pd.read_sql("SELECT * FROM patients_data", conn)
         conn.close()
         return df
-    except Exception:
+    except:
         return pd.DataFrame()
 
 # ---------------------------
-# Risk Analysis
+# Risk Analysis (Predictive + Threshold Fallback)
 # ---------------------------
 def get_risk_explanations(patient):
+    if risk_model:
+        features = [[
+            patient['heart_rate'],
+            patient['temperature'],
+            patient['oxygen'],
+            patient['systolic'],
+            patient['diastolic'],
+            patient['bmi']
+        ]]
+        predicted_risk = risk_model.predict(features)[0]
+        return [f"🔮 Predicted Risk: {predicted_risk.capitalize()}"]
+    
+    # Fallback threshold-based
     risks = []
     if not (60 <= patient['heart_rate'] <= 100):
         risks.append("⚠️ Abnormal Heart Rate: Possible arrhythmia or stress.")
@@ -242,10 +244,8 @@ def login_page():
         else:
             st.error("Invalid username or password ❌")
 
-
 def patients_page():
     st.title("👨‍⚕️ Patients")
-
     if st.button("🔙 Logout"):
         st.session_state.logged_in = False
         st.session_state.page = "login"
@@ -302,36 +302,29 @@ def patients_page():
     else:
         st.info("ℹ️ No patients found.")
 
-
 def dashboard_page():
     load_css()
     patient = st.session_state.selected_patient
     st.title("📊 Health Dashboard")
-
     if st.button("⬅️ Back to Patients"):
         st.session_state.page = "patients"
         st.rerun()
 
     st.subheader(f"Patient: {patient['name']}")
-
-    # --- Metrics
     col1, col2, col3 = st.columns(3)
     col1.metric("❤️ Heart Rate", f"{patient['heart_rate']} BPM")
     col2.metric("🌡️ Temperature", f"{patient['temperature']} °C")
     col3.metric("🫁 Oxygen", f"{patient['oxygen']} %")
-
     col4, col5, col6 = st.columns(3)
     col4.metric("⚖️ BMI", f"{round(patient['bmi'], 2)}")
     col5.metric("🩸 BP", f"{patient['systolic']}/{patient['diastolic']} mmHg")
     col6.metric("Age", f"{patient['age']} yrs")
 
-    # --- Risks
     st.subheader("📝 Risk Analysis")
     risks = get_risk_explanations(patient)
     for r in risks:
         st.write(r)
 
-    # ✅ Doctor’s Notes UI
     st.subheader("💬 Doctor's Notes")
     doctor_notes = st.text_area("Enter any custom details or observations", height=100)
 
@@ -345,7 +338,6 @@ def dashboard_page():
         file_name=f"{patient['name']}_report.pdf",
         mime="application/pdf"
     )
-
 
 # ---------------------------
 # Main Router
