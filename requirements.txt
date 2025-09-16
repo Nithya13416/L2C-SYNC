@@ -5,3 +5,8 @@ streamlit-autorefresh
 slack-sdk
 reportlab
 scikit-learn
+pandas
+ scikit-learn
+ joblib
+ reportlab
+  sqlite3
