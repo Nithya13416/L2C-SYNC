@@ -4,3 +4,4 @@ python-dotenv
 streamlit-autorefresh
 slack-sdk
 reportlab
+scikit-learn
