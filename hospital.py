@@ -16,19 +16,24 @@ load_dotenv()
 SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2")
 SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2")
 
-def send_slack_alert(patient, risks):
-    """Send alert to Slack if risks are found."""
+def send_slack_report(patient, risks):
+    """Send detailed patient vitals to Slack in text format."""
     if not SLACK_BOT_TOKEN2 or not SLACK_CHANNEL_ID2:
         st.warning("⚠️ Slack not configured (missing token or channel ID).")
         return
 
-    real_risks = [r for r in risks if not r.startswith("✅")]
-    if not real_risks:
-        st.info("✅ No critical risks to send.")
-        return
+    message = f"*📋 Patient Vitals Report: {patient['name']}*\n"
+    message += f"• Age: {patient['age']} | Gender: {patient['gender']}\n"
+    message += f"• Weight: {patient['weight']} kg | Height: {patient['height']} cm\n"
+    message += f"• Heart Rate: {patient['heart_rate']} BPM\n"
+    message += f"• Temperature: {patient['temperature']} °C\n"
+    message += f"• Oxygen: {patient['oxygen']} %\n"
+    message += f"• Blood Pressure: {patient['systolic']}/{patient['diastolic']} mmHg\n"
+    message += f"• BMI: {round(patient['bmi'], 2)}\n\n"
 
-    message = f"*🚨 Patient Alert: {patient['name']}* \n"
-    message += "\n".join([f"- {r}" for r in real_risks])
+    message += "*📝 Risk Analysis:*\n"
+    for r in risks:
+        message += f"- {r}\n"
 
     url = "https://slack.com/api/chat.postMessage"
     headers = {
@@ -42,7 +47,7 @@ def send_slack_alert(patient, risks):
     if response.status_code != 200 or not response.json().get("ok", False):
         st.error(f"⚠️ Slack API Error: {response.text}")
     else:
-        st.success("✅ Alert sent to Slack")
+        st.success("✅ Patient report sent to Slack")
 
 # ---------------------------
 # Dummy Users
@@ -299,8 +304,8 @@ def dashboard_page():
     for r in risks:
         st.write(r)
 
-    if st.button("🚨 Send Alert to Slack"):
-        send_slack_alert(patient, risks)
+    if st.button("📤 Send Report to Slack"):
+        send_slack_report(patient, risks)
 
     pdf_buffer = generate_pdf_report(patient, risks)
     st.download_button(
