@@ -1,441 +1,236 @@
-import streamlit as st
-import pandas as pd
-import sqlite3
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import io
-from dotenv import load_dotenv
-import requests
 import os
+import sqlite3
+import datetime
+import streamlit as st
+from dotenv import load_dotenv
+from slack_sdk import WebClient
+from slack_sdk.errors import SlackApiError
+from streamlit_autorefresh import st_autorefresh
 
 # ---------------------------
-# Slack Config
+# Load environment variables
 # ---------------------------
 load_dotenv()
-SLACK_BOT_TOKEN2 = os.getenv("SLACK_BOT_TOKEN2")
-SLACK_CHANNEL_ID2 = os.getenv("SLACK_CHANNEL_ID2")
+SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN", "").strip()
+SLACK_CHANNEL_ID = os.getenv("SLACK_CHANNEL_ID", "").strip()
+slack_client = WebClient(token=SLACK_BOT_TOKEN) if SLACK_BOT_TOKEN else None
 
-def send_slack_alert(patient, risks, note=""):
-    """Send alert to Slack if risks are found, including doctor's notes."""
-    if not SLACK_BOT_TOKEN2 or not SLACK_CHANNEL_ID2:
-        st.warning("⚠️ Slack not configured (missing token or channel ID).")
-        return
-
-    real_risks = [r for r in risks if not r.startswith("✅")]
-    if not real_risks and not note:
-        st.info("✅ No critical risks or notes to send.")
-        return
-
-    message = f"*🚨 Patient Alert: {patient['name']}* \n"
-    if real_risks:
-        message += "\n".join([f"- {r}" for r in real_risks])
-    if note:
-        message += f"\n📝 Doctor's Note: {note}"
-
-    url = "https://slack.com/api/chat.postMessage"
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN2}"}
-    data = {"channel": SLACK_CHANNEL_ID2, "text": message}
-
-    response = requests.post(url, headers=headers, data=data)
-    if response.status_code != 200 or not response.json().get("ok", False):
-        st.error(f"⚠️ Slack API Error: {response.text}")
-    else:
-        st.success("✅ Alert sent to Slack")
+st.set_page_config(page_title="Hospital Messaging & Patient Dashboard", layout="wide")
 
 # ---------------------------
-# Dummy Users
+# Session state setup
 # ---------------------------
-USERS = {
-    "doctor111": "password123",
-    "nurse222": "pass456",
-}
-
-# ---------------------------
-# Session State Initialization
-# ---------------------------
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
 if "page" not in st.session_state:
     st.session_state.page = "login"
-if "selected_patient" not in st.session_state:
-    st.session_state.selected_patient = None
-if "show_form" not in st.session_state:
-    st.session_state.show_form = False
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = {}
 
 # ---------------------------
-# Load CSS for styling
-# ---------------------------
-def load_css():
-    st.markdown(
-        """
-        <style>
-        .block-container { max-width: 1100px; padding-top: 2rem; }
-        h1, h2, h3 { font-family: 'Segoe UI', sans-serif; }
-        .card {
-            background-color: white; border-radius: 16px;
-            padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            margin-bottom: 20px; text-align: center;
-        }
-        .metric-value { font-size: 26px; font-weight: bold; margin-top: 10px; }
-        .status { font-size: 14px; margin-top: 6px; padding: 4px 10px;
-                  border-radius: 12px; display: inline-block; }
-        .normal { background: #d4f8d4; color: #2e7d32; }
-        .good { background: #d0f0ff; color: #0277bd; }
-        .low { background: #ffe0e0; color: #c62828; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-# ---------------------------
-# Database Helper Functions
+# Database Setup
 # ---------------------------
 def init_db():
-    conn = sqlite3.connect("patients.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS patients_data (
-            name TEXT, age INTEGER, gender TEXT,
-            weight REAL, height REAL, email TEXT,
-            heart_rate INTEGER, temperature REAL,
-            oxygen INTEGER, systolic INTEGER,
-            diastolic INTEGER, bmi REAL,
-            notes TEXT
+    conn = sqlite3.connect("hospital.db")
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS patients (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            age INTEGER,
+            condition TEXT,
+            admitted_on DATE
         )
     """)
     conn.commit()
     conn.close()
 
-def save_uploaded_data(df):
-    df["bmi"] = df.apply(lambda x: round(x["Weight"] / ((x["Height"]/100)**2), 2), axis=1)
-
-    df = df.rename(columns={
-        "Name": "name",
-        "Age": "age",
-        "Gender": "gender",
-        "Weight": "weight",
-        "Height": "height",
-        "Email": "email",
-        "HeartRate": "heart_rate",
-        "Temperature": "temperature",
-        "Oxygen": "oxygen",
-        "Systolic": "systolic",
-        "Diastolic": "diastolic"
-    })
-
-    df["notes"] = ""
-
-    conn = sqlite3.connect("patients.db")
-    df.to_sql("patients_data", conn, if_exists="append", index=False)
-    conn.close()
-
-def save_manual_patient(patient):
-    conn = sqlite3.connect("patients.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO patients_data 
-        (name, age, gender, weight, height, email, heart_rate, temperature,
-         oxygen, systolic, diastolic, bmi, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        patient["name"], patient["age"], patient["gender"], patient["weight"], patient["height"],
-        patient["email"], patient["heart_rate"], patient["temperature"], patient["oxygen"],
-        patient["systolic"], patient["diastolic"], patient["bmi"], patient.get("notes", "")
-    ))
+def add_patient(name, age, condition):
+    conn = sqlite3.connect("hospital.db")
+    c = conn.cursor()
+    c.execute("INSERT INTO patients (name, age, condition, admitted_on) VALUES (?, ?, ?, ?)",
+              (name, age, condition, datetime.date.today()))
     conn.commit()
     conn.close()
 
 def get_patients():
-    conn = sqlite3.connect("patients.db")
-    df = pd.read_sql("SELECT * FROM patients_data", conn)
+    conn = sqlite3.connect("hospital.db")
+    c = conn.cursor()
+    c.execute("SELECT * FROM patients")
+    rows = c.fetchall()
     conn.close()
-    return df
-
-def update_patient_notes(name, notes):
-    conn = sqlite3.connect("patients.db")
-    cursor = conn.cursor()
-    cursor.execute("UPDATE patients_data SET notes = ? WHERE name = ?", (notes, name))
-    conn.commit()
-    conn.close()
+    return rows
 
 # ---------------------------
-# Health Risk Analysis
+# Slack Helpers
 # ---------------------------
-def get_risk_explanations(patient):
-    risks = []
-    if not (60 <= patient['heart_rate'] <= 100):
-        risks.append("⚠️ Abnormal Heart Rate: May indicate arrhythmia, dehydration, or stress.")
-    if not (36 <= patient['temperature'] <= 37.5):
-        risks.append("🌡️ Abnormal Temperature: Could indicate fever or hypothermia.")
-    if not (18.5 <= patient['bmi'] <= 24.9):
-        risks.append("⚖️ Unhealthy BMI: Risk of obesity, diabetes, or malnutrition.")
-    if not (patient['systolic'] < 140 and patient['diastolic'] < 90):
-        risks.append("🩸 High Blood Pressure: Risk of hypertension and cardiovascular disease.")
-    if patient['oxygen'] < 95:
-        risks.append("🫁 Low Oxygen Level: Possible respiratory issues or hypoxemia.")
-    if not risks:
-        risks.append("✅ All vitals are within healthy ranges.")
-    return risks
+def send_to_slack_channel(sender_name, message_text):
+    """Send message directly into Slack channel via bot token"""
+    if not slack_client or not SLACK_CHANNEL_ID:
+        return False, "Slack client not configured."
+    try:
+        slack_client.chat_postMessage(
+            channel=SLACK_CHANNEL_ID,
+            text=f"*{sender_name}*: {message_text}"
+        )
+        return True, "ok"
+    except SlackApiError as e:
+        return False, e.response["error"]
 
-# ---------------------------
-# PDF Report Generator
-# ---------------------------
-def generate_pdf_report(patient, risks, note=""):
-    buffer = io.BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(50, 750, "Patient Health Report")
+def get_slack_username(user_id):
+    try:
+        if not slack_client:
+            return "Unknown"
+        resp = slack_client.users_info(user=user_id)
+        return resp["user"]["profile"].get("real_name", "Unknown")
+    except Exception:
+        return "Unknown"
 
-    c.setFont("Helvetica", 12)
-    c.drawString(50, 720, f"Name: {patient['name']}")
-    c.drawString(50, 700, f"Age: {patient['age']}   Gender: {patient['gender']}")
-    c.drawString(50, 680, f"Email (Emergency): {patient['email']}")
-
-    c.drawString(50, 650, f"Heart Rate: {patient['heart_rate']} BPM")
-    c.drawString(50, 630, f"Temperature: {patient['temperature']} °C")
-    c.drawString(50, 610, f"Oxygen: {patient['oxygen']}%")
-    c.drawString(50, 590, f"Blood Pressure: {patient['systolic']}/{patient['diastolic']} mmHg")
-    c.drawString(50, 570, f"BMI: {round(patient['bmi'], 2)}")
-
-    c.setFont("Helvetica-Bold", 14)
-    c.drawString(50, 540, "Risk Analysis:")
-
-    c.setFont("Helvetica", 12)
-    y = 520
-    for risk in risks:
-        c.drawString(60, y, f"- {risk}")
-        y -= 20
-
-    if note:
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(50, y - 10, "Doctor's Note:")
-        c.setFont("Helvetica", 12)
-        c.drawString(60, y - 30, note)
-
-    c.save()
-    buffer.seek(0)
-    return buffer
+def fetch_from_slack():
+    """Fetch last 10 messages from Slack channel"""
+    if not slack_client or not SLACK_CHANNEL_ID:
+        return []
+    try:
+        response = slack_client.conversations_history(channel=SLACK_CHANNEL_ID, limit=10)
+        messages = []
+        for msg in reversed(response.get("messages", [])):
+            user_id = msg.get("user", None)
+            sender_name = get_slack_username(user_id) if user_id else "Slack Bot"
+            messages.append({
+                "sender": {"name": sender_name, "email": "slack@channel"},
+                "recipient": {"name": "You", "email": "local@app"},
+                "message": msg.get("text", ""),
+                "timestamp": datetime.datetime.fromtimestamp(float(msg["ts"])).strftime("%Y-%m-%d %H:%M:%S"),
+                "status": "📥 Received"
+            })
+        return messages
+    except SlackApiError as e:
+        st.error(f"Slack fetch error: {e.response['error']}")
+        return []
 
 # ---------------------------
-# Login Page
+# Pages
 # ---------------------------
 def login_page():
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.image(
-            "https://img.freepik.com/free-vector/health-professional-team-with-heart_23-2148503275.jpg",
-            use_container_width=True
-        )
-    with col2:
-        st.markdown("### Sign in")
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-
-        if st.button("🔐 Sign In with Username"):
-            if username in USERS and USERS[username] == password:
-                st.session_state.logged_in = True
-                st.session_state.page = "patients"
-                st.success("Login successful ✅")
-                st.rerun()
-            else:
-                st.error("Invalid username or password ❌")
-
-# ---------------------------
-# Patients Page
-# ---------------------------
-def patients_page():
-    st.title("👨‍⚕️ My Patients")
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🔙 Logout"):
-            st.session_state.logged_in = False
-            st.session_state.page = "login"
-            st.rerun()
-    with col2:
-        if st.button("🔑 Back to Login"):
-            st.session_state.page = "login"
-            st.rerun()
-
-    st.subheader("📂 Upload Patient Data (Excel)")
-    uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
-
-    if uploaded_file is not None:
-        df = pd.read_excel(uploaded_file)
-        save_uploaded_data(df)
-        st.success("✅ Data uploaded & saved successfully!")
-        st.dataframe(df)
-
-    if st.button("➕ Add New Patient"):
-        st.session_state.show_form = True
-
-    if st.session_state.show_form:
-        st.subheader("📝 Enter Patient Details Manually")
-        with st.form("manual_form"):
-            name = st.text_input("Name")
-            age = st.number_input("Age", min_value=0, max_value=120)
-            gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-            weight = st.number_input("Weight (kg)", min_value=0.0)
-            height = st.number_input("Height (cm)", min_value=0.0)
-            email = st.text_input("Emergency Email")
-            heart_rate = st.number_input("Heart Rate (BPM)", min_value=0)
-            temperature = st.number_input("Temperature (°C)", min_value=25.0, max_value=45.0)
-            oxygen = st.number_input("Oxygen (%)", min_value=0, max_value=100)
-            systolic = st.number_input("Systolic (mmHg)", min_value=0)
-            diastolic = st.number_input("Diastolic (mmHg)", min_value=0)
-
-            submitted = st.form_submit_button("✅ Save Patient")
-            if submitted:
-                bmi = round(weight / ((height/100)**2), 2) if height > 0 else 0
-                patient = {
-                    "name": name, "age": age, "gender": gender, "weight": weight, "height": height,
-                    "email": email, "heart_rate": heart_rate, "temperature": temperature,
-                    "oxygen": oxygen, "systolic": systolic, "diastolic": diastolic, "bmi": bmi,
-                    "notes": ""
-                }
-                save_manual_patient(patient)
-                st.success(f"✅ Patient {name} added successfully")
-                st.session_state.show_form = False
-                st.rerun()
-
-    try:
-        df = get_patients()
-        st.markdown("### Patient List:")
-        for i, row in df.iterrows():
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                note_badge = "📝 Notes" if row.get("notes") else ""
-                st.write(f"👤 {row['name']} ({row['age']} yrs) {note_badge}")
-            with col2:
-                if st.button("View Metrics", key=f"view_{i}"):
-                    st.session_state.selected_patient = row
-                    st.session_state.page = "dashboard"
-                    st.rerun()
-    except Exception:
-        st.info("ℹ️ No patient data found. Please upload an Excel file or add manually.")
-
-# ---------------------------
-# Dashboard Page
-# ---------------------------
-def dashboard_page():
-    load_css()
-    patient = st.session_state.selected_patient
-
-    st.title("📊 Smartwatch Health Dashboard")
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("🔙 Return to Patients"):
+    st.title("🔐 Hospital Portal Login")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username == "admin" and password == "admin":  # demo creds
             st.session_state.page = "patients"
+            st.success("Login successful!")
             st.rerun()
-    with col2:
-        if st.button("🔑 Back to Login"):
-            st.session_state.page = "login"
+        else:
+            st.error("Invalid credentials")
+
+def patients_page():
+    st.title("🏥 Patient Management")
+
+    with st.form("add_patient_form"):
+        name = st.text_input("Patient Name")
+        age = st.number_input("Age", min_value=0, max_value=120, step=1)
+        condition = st.text_area("Condition / Notes")
+        submit = st.form_submit_button("Add Patient")
+        if submit:
+            add_patient(name, age, condition)
+            st.success(f"✅ Patient {name} added successfully!")
+
+    st.subheader("Patient Records")
+    patients = get_patients()
+    if patients:
+        for p in patients:
+            st.markdown(f"- **{p[1]}** (Age {p[2]}), Condition: {p[3]}, Admitted: {p[4]}")
+    else:
+        st.info("No patients yet.")
+
+    if st.button("📊 View Metrics"):
+        st.session_state.page = "dashboard"
+        st.rerun()
+
+def dashboard_page():
+    st.title("📊 Hospital Dashboard & Messaging")
+
+    # Auto-refresh every 5s
+    st_autorefresh(interval=5000, limit=None, key="slack_refresher")
+
+    # ---- Messaging Section ----
+    st.subheader("💬 Teams-like Messaging")
+    sender_name = st.text_input("Your Name", value="")
+    sender_email = st.text_input("Your Email", value="")
+    recipient_email = "slack@channel"
+    message_text = st.text_area("Type your message here...", height=120)
+
+    if st.button("Send Message"):
+        if not (sender_name and sender_email and message_text):
+            st.error("Please fill in all fields.")
+        else:
+            payload = {
+                "sender": {"name": sender_name, "email": sender_email},
+                "recipient": {"name": "Slack Channel", "email": recipient_email},
+                "message": message_text,
+                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "status": "✅ Delivered"
+            }
+            st.session_state.chat_history.setdefault(recipient_email, []).append(payload)
+            ok, info = send_to_slack_channel(sender_name, message_text)
+            if ok:
+                st.success("Message sent to Slack channel!")
+            else:
+                st.error(f"Slack send failed: {info}")
             st.rerun()
 
-    st.subheader(f"Patient: {patient['name']}")
+    if SLACK_BOT_TOKEN and SLACK_CHANNEL_ID:
+        slack_msgs = fetch_from_slack()
+        for sm in slack_msgs:
+            st.session_state.chat_history.setdefault("slack@channel", [])
+            if sm not in st.session_state.chat_history["slack@channel"]:
+                st.session_state.chat_history["slack@channel"].append(sm)
 
-    # --- Metrics Cards ---
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.markdown(f"""
-            <div class="card">
-                <h4>❤️ Heart Rate</h4>
-                <div class="metric-value">{patient['heart_rate']} BPM</div>
-                <div class="status {'normal' if 60 <= patient['heart_rate'] <= 100 else 'low'}">
-                    {'Normal' if 60 <= patient['heart_rate'] <= 100 else 'Alert'}
+    st.markdown("---")
+    st.subheader("Conversation with Slack Channel")
+    chats = st.session_state.chat_history.get("slack@channel", [])
+    for chat in chats[-5:]:  # last 5 messages
+        is_sender = chat["sender"]["email"] == sender_email
+        bubble_bg = "#0078D4" if is_sender else "#E5E5EA"
+        text_color = "white" if is_sender else "black"
+        align = "flex-end" if is_sender else "flex-start"
+        avatar_text = chat["sender"]["name"][:2].upper()
+        st.markdown(
+            f"""
+            <div style='display:flex; justify-content:{align}; margin: 10px 0;'>
+              <div style='display:flex; align-items:flex-end; gap:10px;'>
+                <div style='width:40px;height:40px;background:#555;border-radius:50%;
+                            color:white;display:flex;align-items:center;justify-content:center;font-weight:bold;'>
+                  {avatar_text}
                 </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col2:
-        st.markdown(f"""
-            <div class="card">
-                <h4>👤 Patient Info</h4>
-                <p>{patient['name']}</p>
-                <p>Emergency: {patient['email']}</p>
-                <p>Age: {patient['age']} | Gender: {patient['gender']}</p>
-                <p>Weight: {patient['weight']} | Height: {patient['height']}</p>
-            </div>
-        """, unsafe_allow_html=True)
-    with col3:
-        st.markdown(f"""
-            <div class="card">
-                <h4>🌡️ Temperature</h4>
-                <div class="metric-value">{patient['temperature']}°C</div>
-                <div class="status {'good' if 36 <= patient['temperature'] <= 37.5 else 'low'}">
-                    {'Good' if 36 <= patient['temperature'] <= 37.5 else 'Alert'}
+                <div style='background:{bubble_bg};color:{text_color};padding:12px 14px;border-radius:12px;max-width:60%;'>
+                  <b>{chat['sender']['name']}</b><br/>
+                  {chat['message']}<br/>
+                  <span style='font-size:.8em;opacity:.75;'>{chat['timestamp']} {chat['status']}</span>
                 </div>
+              </div>
             </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True
+        )
 
-    col4, col5, col6 = st.columns(3)
-    with col4:
-        st.markdown(f"""
-            <div class="card">
-                <h4>BMI</h4>
-                <div class="metric-value">{round(patient['bmi'], 2)}</div>
-                <div class="status {'normal' if 18.5 <= patient['bmi'] <= 24.9 else 'low'}">
-                    {'Normal' if 18.5 <= patient['bmi'] <= 24.9 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col5:
-        st.markdown(f"""
-            <div class="card">
-                <h4>🩸 Blood Pressure</h4>
-                <div class="metric-value">{patient['systolic']}/{patient['diastolic']}</div>
-                <div class="status {'normal' if patient['systolic']<140 and patient['diastolic']<90 else 'low'}">
-                    {'Normal' if patient['systolic']<140 and patient['diastolic']<90 else 'Alert'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
-    with col6:
-        st.markdown(f"""
-            <div class="card">
-                <h4>Oxygen Level</h4>
-                <div class="metric-value">{patient['oxygen']}%</div>
-                <div class="status {'normal' if patient['oxygen']>=95 else 'low'}">
-                    {'Normal' if patient['oxygen']>=95 else 'Low'}
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+    # ---- Metrics Section ----
+    st.markdown("---")
+    st.subheader("📈 Metrics")
+    patients = get_patients()
+    st.metric("Total Patients", len(patients))
+    st.metric("Today's Date", datetime.date.today())
 
-    # --- Risk Analysis ---
-    st.subheader("📝 Detailed Risk Analysis")
-    risks = get_risk_explanations(patient)
-    for r in risks:
-        st.write(r)
-
-    # --- Doctor's Notes ---
-    st.subheader("💬 Doctor's Notes")
-    default_note = patient["notes"] if "notes" in patient else ""
-    st.session_state.custom_note = st.text_area(
-        "Type any additional observations or instructions here:",
-        value=default_note,
-        height=100
-    )
-
-    if st.button("💾 Save Doctor's Note"):
-        update_patient_notes(patient["name"], st.session_state.custom_note)
-        st.success("✅ Doctor's note saved successfully")
-
-    # ✅ Slack Button
-    if st.button("🚨 Send Alert to Slack"):
-        send_slack_alert(patient, risks, st.session_state.custom_note)
-
-    # --- PDF Report Download ---
-    pdf_buffer = generate_pdf_report(patient, risks, st.session_state.custom_note)
-    st.download_button(
-        label="📥 Download Patient Report (PDF)",
-        data=pdf_buffer,
-        file_name=f"{patient['name']}_report.pdf",
-        mime="application/pdf"
-    )
+    if st.button("⬅️ Back to Patients"):
+        st.session_state.page = "patients"
+        st.rerun()
 
 # ---------------------------
-# Main Router
+# Router
 # ---------------------------
 init_db()
 
 if st.session_state.page == "login":
     login_page()
+elif st.session_state.page == "patients":
+    patients_page()
+elif st.session_state.page == "dashboard":
+    dashboard_page()
