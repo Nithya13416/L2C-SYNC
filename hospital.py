@@ -171,6 +171,9 @@ def get_patients():
 # Risk Analysis (Predictive + Threshold Fallback)
 # ---------------------------
 def get_risk_explanations(patient):
+    risks = []
+
+    # --- AI Model Prediction ---
     if risk_model:
         features = [[
             patient['heart_rate'],
@@ -181,10 +184,9 @@ def get_risk_explanations(patient):
             patient['bmi']
         ]]
         predicted_risk = risk_model.predict(features)[0]
-        return [f"🔮 Predicted Risk: {predicted_risk.capitalize()}"]
+        risks.append(f"🔮 AI Predicted Risk: {predicted_risk.capitalize()}")
     
-    # Fallback threshold-based
-    risks = []
+    # --- Threshold-Based Rules ---
     if not (60 <= patient['heart_rate'] <= 100):
         risks.append("⚠️ Abnormal Heart Rate: Possible arrhythmia or stress.")
     if not (36 <= patient['temperature'] <= 37.5):
@@ -195,8 +197,11 @@ def get_risk_explanations(patient):
         risks.append("🩸 High Blood Pressure: Hypertension risk.")
     if patient['oxygen'] < 95:
         risks.append("🫁 Low Oxygen Level: Possible hypoxemia.")
-    if not risks:
-        risks.append("✅ All vitals are within healthy ranges.")
+    
+    # If no threshold risk found
+    if len(risks) == (1 if risk_model else 0):  
+        risks.append("✅ All vitals are within healthy ranges (threshold check).")
+
     return risks
 
 # ---------------------------
