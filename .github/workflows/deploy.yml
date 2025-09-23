@@ -2,9 +2,9 @@ name: Streamlit CI/CD for WebApp1
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    paths:
+      - "webapp1.py"
+      - "requirements.txt"
 
 jobs:
   build:
@@ -17,7 +17,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.9"
 
       - name: Install Dependencies
         run: |
@@ -26,4 +26,6 @@ jobs:
 
       - name: Run WebApp1 (Test Only)
         run: |
-          streamlit run webapp1.py --server.headless true --server.port 8501
+          streamlit run webapp1.py --server.headless true --server.port 8501 &
+          sleep 10
+          pkill -f streamlit
